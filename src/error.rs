@@ -13,13 +13,15 @@ pub struct CodeM8Error {
 }
 
 impl CodeM8Error {
+    #[must_use]
     pub fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
         }
     }
 
-    pub fn io(path: &Path, action: &str, error: io::Error) -> Self {
+    #[must_use]
+    pub fn io(path: &Path, action: &str, error: &io::Error) -> Self {
         Self::new(format!("could not {action} {}: {error}", format_path(path)))
     }
 }

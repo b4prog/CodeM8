@@ -1,3 +1,5 @@
+use std::fmt::Write as _;
+
 use crate::model::DuplicateBlock;
 use crate::paths::format_path;
 
@@ -8,33 +10,37 @@ pub struct DuplicateReport {
     pub duplicate_blocks: Vec<DuplicateBlock>,
 }
 
+#[must_use]
 pub fn render_duplicate_report(report: &DuplicateReport) -> String {
     let mut output = String::new();
     output.push_str("Duplicate Code Report\n");
     output.push_str("=====================\n\n");
-    output.push_str(&format!("Analyzed files: {}\n", report.analyzed_files));
-    output.push_str(&format!(
-        "Analyzed extensions: {}\n",
+    let _ = writeln!(output, "Analyzed files: {}", report.analyzed_files);
+    let _ = writeln!(
+        output,
+        "Analyzed extensions: {}",
         report.analyzed_extensions.join(", ")
-    ));
-    output.push_str(&format!(
-        "Duplicate blocks found: {}\n",
+    );
+    let _ = writeln!(
+        output,
+        "Duplicate blocks found: {}",
         report.duplicate_blocks.len()
-    ));
+    );
     for (index, block) in report.duplicate_blocks.iter().enumerate() {
         output.push('\n');
-        output.push_str(&format!("#{} Weight: {}\n", index + 1, block.weight));
-        output.push_str(&format!("Lines: {}\n", block.line_count()));
-        output.push_str(&format!("Characters: {}\n", block.character_count()));
-        output.push_str(&format!("Occurrences: {}\n\n", block.occurrences.len()));
+        let _ = writeln!(output, "#{} Weight: {}", index + 1, block.weight);
+        let _ = writeln!(output, "Lines: {}", block.line_count());
+        let _ = writeln!(output, "Characters: {}", block.character_count());
+        let _ = writeln!(output, "Occurrences: {}\n", block.occurrences.len());
         output.push_str("Locations:\n");
         for occurrence in &block.occurrences {
-            output.push_str(&format!(
-                "- {}:{}-{}\n",
+            let _ = writeln!(
+                output,
+                "- {}:{}-{}",
                 format_path(&occurrence.file_path),
                 occurrence.start_line,
                 occurrence.end_line
-            ));
+            );
         }
         output.push_str("\nCode:\n");
         for line in &block.normalized_lines {

@@ -5,13 +5,23 @@ use crate::error::{CodeM8Error, Result};
 use crate::language::{classify_line, hash_normalized_line};
 use crate::model::{LineEntry, ProcessedFile, SourceFile};
 
+/// Processes a set of source files into normalized line entries.
+///
+/// # Errors
+///
+/// Returns an error when any input file cannot be opened or read as UTF-8 text.
 pub fn process_source_files(source_files: &[SourceFile]) -> Result<Vec<ProcessedFile>> {
     source_files.iter().map(process_source_file).collect()
 }
 
+/// Processes one source file into its normalized, classified lines.
+///
+/// # Errors
+///
+/// Returns an error when the file cannot be opened or read as UTF-8 text.
 pub fn process_source_file(source_file: &SourceFile) -> Result<ProcessedFile> {
     let file = File::open(&source_file.path)
-        .map_err(|error| CodeM8Error::io(&source_file.display_path, "open file", error))?;
+        .map_err(|error| CodeM8Error::io(&source_file.display_path, "open file", &error))?;
     let reader = BufReader::new(file);
     let mut lines = Vec::new();
     for (index, line) in reader.lines().enumerate() {
@@ -40,6 +50,7 @@ pub fn process_source_file(source_file: &SourceFile) -> Result<ProcessedFile> {
     })
 }
 
+#[must_use]
 pub fn normalize_line(line: &str) -> Option<String> {
     let normalized = line.trim();
     if normalized.is_empty() {

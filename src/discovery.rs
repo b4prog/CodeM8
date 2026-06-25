@@ -20,18 +20,23 @@ const IGNORED_DIRECTORIES: &[&str] = &[
     ".vscode",
 ];
 
+/// Discovers source files that match the selected extensions.
+///
+/// # Errors
+///
+/// Returns an error when explicit files are invalid or when walking the file
+/// tree fails.
 pub fn discover_source_files(
     current_dir: &Path,
     extensions: &[String],
     explicit_files: Option<&[PathBuf]>,
 ) -> Result<Vec<SourceFile>> {
-    let mut source_files = match explicit_files {
-        Some(files) => discover_explicit_files(current_dir, extensions, files)?,
-        None => {
-            let mut source_files = Vec::new();
-            walk_directory(current_dir, current_dir, extensions, &mut source_files)?;
-            source_files
-        }
+    let mut source_files = if let Some(files) = explicit_files {
+        discover_explicit_files(current_dir, extensions, files)?
+    } else {
+        let mut source_files = Vec::new();
+        walk_directory(current_dir, current_dir, extensions, &mut source_files)?;
+        source_files
     };
     source_files.sort_by(|left, right| {
         format_path(&left.display_path).cmp(&format_path(&right.display_path))
@@ -81,7 +86,7 @@ fn discover_explicit_files(
             continue;
         };
         let canonical_path = fs::canonicalize(&path)
-            .map_err(|error| CodeM8Error::io(&path, "canonicalize explicit file", error))?;
+            .map_err(|error| CodeM8Error::io(&path, "canonicalize explicit file", &error))?;
         if !seen_paths.insert(canonical_path.clone()) {
             continue;
         }
@@ -101,9 +106,9 @@ fn walk_directory(
     source_files: &mut Vec<SourceFile>,
 ) -> Result<()> {
     let mut entries = fs::read_dir(directory)
-        .map_err(|error| CodeM8Error::io(directory, "read directory", error))?
+        .map_err(|error| CodeM8Error::io(directory, "read directory", &error))?
         .collect::<std::result::Result<Vec<_>, _>>()
-        .map_err(|error| CodeM8Error::io(directory, "read directory entry", error))?;
+        .map_err(|error| CodeM8Error::io(directory, "read directory entry", &error))?;
     entries.sort_by(|left, right| {
         left.file_name()
             .to_string_lossy()
@@ -113,7 +118,7 @@ fn walk_directory(
         let path = entry.path();
         let file_type = entry
             .file_type()
-            .map_err(|error| CodeM8Error::io(&path, "inspect path", error))?;
+            .map_err(|error| CodeM8Error::io(&path, "inspect path", &error))?;
         if file_type.is_symlink() {
             continue;
         }
@@ -129,8 +134,7 @@ fn walk_directory(
             };
             let display_path = path
                 .strip_prefix(root)
-                .map(normalize_display_path)
-                .unwrap_or_else(|_| normalize_display_path(&path));
+                .map_or_else(|_| normalize_display_path(&path), normalize_display_path);
             source_files.push(SourceFile {
                 path,
                 display_path,

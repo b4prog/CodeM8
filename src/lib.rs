@@ -13,6 +13,12 @@ use std::path::Path;
 
 use crate::error::{CodeM8Error, Result};
 
+/// Runs the CLI workflow and writes the selected report to the provided writer.
+///
+/// # Errors
+///
+/// Returns an error when argument parsing, file discovery, file processing, or
+/// report writing fails.
 pub fn run<I, S, W>(args: I, current_dir: &Path, writer: &mut W) -> Result<()>
 where
     I: IntoIterator<Item = S>,

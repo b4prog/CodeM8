@@ -1,9 +1,11 @@
 use std::path::{Component, Path, PathBuf};
 
+#[must_use]
 pub fn format_path(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
+#[must_use]
 pub fn normalize_display_path(path: &Path) -> PathBuf {
     let mut normalized = PathBuf::new();
     for component in path.components() {

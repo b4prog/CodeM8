@@ -8,7 +8,7 @@ Run the repository verification commands from the workspace root and fix any iss
 
 ```bash
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --all-features -- -D warnings -W clippy::too_many_lines -W clippy::too_many_arguments -W clippy::type_complexity -W clippy::excessive_nesting -W clippy::cognitive_complexity
+cargo clippy --workspace --all-targets --all-features -- -D warnings -W clippy::too_many_lines -W clippy::too_many_arguments -W clippy::type_complexity -W clippy::excessive_nesting -W clippy::cognitive_complexity -W clippy::pedantic -W clippy::nursery -W clippy::cargo
 rtk cargo build --locked --all-targets
 ```
 

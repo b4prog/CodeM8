@@ -11,6 +11,12 @@ pub struct CliConfig {
     pub files: Option<Vec<PathBuf>>,
 }
 
+/// Parses command-line arguments into a validated CLI configuration.
+///
+/// # Errors
+///
+/// Returns an error when the arguments are invalid, repeated, or missing the
+/// required report switch.
 pub fn parse_args<I, S>(args: I) -> Result<CliConfig>
 where
     I: IntoIterator<Item = S>,
@@ -57,13 +63,19 @@ where
         file_extensions: file_extensions.unwrap_or_else(|| {
             DEFAULT_FILE_EXTENSIONS
                 .iter()
-                .map(|extension| extension.to_string())
+                .map(std::string::ToString::to_string)
                 .collect()
         }),
         files,
     })
 }
 
+/// Parses a comma-separated list of file extensions.
+///
+/// # Errors
+///
+/// Returns an error when an extension is empty, starts with `.`, or contains a
+/// path separator.
 pub fn parse_file_extensions(value: &str) -> Result<Vec<String>> {
     let mut extensions = Vec::new();
     for raw_extension in value.split(',') {
@@ -92,6 +104,11 @@ pub fn parse_file_extensions(value: &str) -> Result<Vec<String>> {
     Ok(extensions)
 }
 
+/// Parses a comma-separated list of explicit file paths.
+///
+/// # Errors
+///
+/// Returns an error when any provided file path is empty.
 pub fn parse_file_list(value: &str) -> Result<Vec<PathBuf>> {
     let mut files = Vec::new();
     for raw_file in value.split(',') {

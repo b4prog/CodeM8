@@ -126,10 +126,12 @@ struct BlockOnlyRegistry {
 
 static BLOCK_ONLY_REGISTRY: OnceLock<BlockOnlyRegistry> = OnceLock::new();
 
+#[must_use]
 pub fn hash_normalized_line(line: &str) -> u128 {
     xxhash_rust::xxh3::xxh3_128(line.as_bytes())
 }
 
+#[must_use]
 pub fn classify_line(extension: &str, normalized_line: &str, hash: u128) -> LineStatus {
     let extension = extension.to_ascii_lowercase();
     let Some(patterns_by_hash) = registry().by_extension.get(extension.as_str()) else {
