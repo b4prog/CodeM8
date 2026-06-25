@@ -2,6 +2,8 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use ignore::{DirEntry, WalkBuilder};
+
 use crate::error::{CodeM8Error, Result};
 use crate::model::SourceFile;
 use crate::paths::{format_path, normalize_display_path};
@@ -34,14 +36,64 @@ pub fn discover_source_files(
     let mut source_files = if let Some(files) = explicit_files {
         discover_explicit_files(current_dir, extensions, files)?
     } else {
-        let mut source_files = Vec::new();
-        walk_directory(current_dir, current_dir, extensions, &mut source_files)?;
-        source_files
+        discover_recursive_files(current_dir, extensions)?
     };
     source_files.sort_by(|left, right| {
         format_path(&left.display_path).cmp(&format_path(&right.display_path))
     });
     Ok(source_files)
+}
+
+fn discover_recursive_files(root: &Path, extensions: &[String]) -> Result<Vec<SourceFile>> {
+    let walker = WalkBuilder::new(root)
+        .hidden(false)
+        .ignore(true)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .require_git(false)
+        .parents(true)
+        .filter_entry(should_walk_entry)
+        .build();
+    let mut source_files = Vec::new();
+    for entry in walker {
+        let entry = entry.map_err(|error| {
+            CodeM8Error::new(format!(
+                "could not walk directory {}: {error}",
+                format_path(root)
+            ))
+        })?;
+        let Some(file_type) = entry.file_type() else {
+            continue;
+        };
+        if !file_type.is_file() {
+            continue;
+        }
+        let path = entry.path();
+        let Some(extension) = selected_extension(path, extensions) else {
+            continue;
+        };
+        let display_path = path
+            .strip_prefix(root)
+            .map_or_else(|_| normalize_display_path(path), normalize_display_path);
+        source_files.push(SourceFile {
+            path: path.to_path_buf(),
+            display_path,
+            extension,
+        });
+    }
+    Ok(source_files)
+}
+
+fn should_walk_entry(entry: &DirEntry) -> bool {
+    let Some(file_type) = entry.file_type() else {
+        return true;
+    };
+    if !file_type.is_dir() || entry.depth() == 0 {
+        return true;
+    }
+    let directory_name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+    !IGNORED_DIRECTORIES.contains(&directory_name.as_str())
 }
 
 fn discover_explicit_files(
@@ -106,52 +158,6 @@ fn discover_explicit_files(
     Ok(source_files)
 }
 
-fn walk_directory(
-    root: &Path,
-    directory: &Path,
-    extensions: &[String],
-    source_files: &mut Vec<SourceFile>,
-) -> Result<()> {
-    let mut entries = fs::read_dir(directory)
-        .map_err(|error| CodeM8Error::io(directory, "read directory", &error))?
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .map_err(|error| CodeM8Error::io(directory, "read directory entry", &error))?;
-    entries.sort_by(|left, right| {
-        left.file_name()
-            .to_string_lossy()
-            .cmp(&right.file_name().to_string_lossy())
-    });
-    for entry in entries {
-        let path = entry.path();
-        let file_type = entry
-            .file_type()
-            .map_err(|error| CodeM8Error::io(&path, "inspect path", &error))?;
-        if file_type.is_symlink() {
-            continue;
-        }
-        if file_type.is_dir() {
-            let directory_name = entry.file_name().to_string_lossy().to_ascii_lowercase();
-            if IGNORED_DIRECTORIES.contains(&directory_name.as_str()) {
-                continue;
-            }
-            walk_directory(root, &path, extensions, source_files)?;
-        } else if file_type.is_file() {
-            let Some(extension) = selected_extension(&path, extensions) else {
-                continue;
-            };
-            let display_path = path
-                .strip_prefix(root)
-                .map_or_else(|_| normalize_display_path(&path), normalize_display_path);
-            source_files.push(SourceFile {
-                path,
-                display_path,
-                extension,
-            });
-        }
-    }
-    Ok(())
-}
-
 fn selected_extension(path: &Path, extensions: &[String]) -> Option<String> {
     let extension = path.extension()?.to_str()?.to_ascii_lowercase();
     extensions
@@ -193,6 +199,20 @@ mod tests {
         let files = discover_source_files(&root, &["ts".to_string()], None).expect("discover");
         assert_eq!(files.len(), 1);
         assert_eq!(format_path(&files[0].display_path), "src/a.TS");
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn recursive_discovery_respects_gitignore_without_requiring_git_repository() {
+        let root = temp_dir("gitignore");
+        fs::create_dir_all(root.join("src")).expect("create src");
+        fs::create_dir_all(root.join("generated")).expect("create generated");
+        fs::write(root.join(".gitignore"), "generated/\n").expect("write gitignore");
+        fs::write(root.join("src").join("a.ts"), "").expect("write source ts");
+        fs::write(root.join("generated").join("ignored.ts"), "").expect("write ignored ts");
+        let files = discover_source_files(&root, &["ts".to_string()], None).expect("discover");
+        assert_eq!(files.len(), 1);
+        assert_eq!(format_path(&files[0].display_path), "src/a.ts");
         fs::remove_dir_all(root).expect("cleanup");
     }
 
