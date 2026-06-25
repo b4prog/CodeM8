@@ -9,4 +9,5 @@ keywords = ["cli", "duplicate-detection", "source-code", "analysis"]
 categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
+regex = "1"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use crate::model::LineStatus;
+use regex::Regex;
 
 #[derive(Debug, Clone, Copy)]
 pub struct LanguageLinePattern {
@@ -9,113 +10,137 @@ pub struct LanguageLinePattern {
     pub extensions: &'static [&'static str],
     pub duplicate_mitigation_pattern: &'static [char],
     pub duplicate_mitigation_lines: &'static [&'static str],
+    pub duplicate_mitigation_regexps: &'static [&'static str],
 }
 
 pub const LANGUAGE_PATTERNS: &[LanguageLinePattern] = &[
     LanguageLinePattern {
         language_name: "TypeScript / JavaScript",
         extensions: &["ts", "tsx", "js", "jsx", "mjs", "cjs"],
-        duplicate_mitigation_pattern: &['(', ')', '{', '}', '[', ']', ';', ',', '?', ':', '<', '>'],
+        duplicate_mitigation_pattern: &['(', ')', ',', ':', ';', '<', '>', '?', '[', ']', '{', '}'],
         duplicate_mitigation_lines: &[],
+        duplicate_mitigation_regexps: &[],
     },
     LanguageLinePattern {
         language_name: "Rust",
         extensions: &["rs"],
-        duplicate_mitigation_pattern: &['(', ')', '{', '}', '[', ']', ';', ',', '?', ':', '<', '>'],
-        duplicate_mitigation_lines: &[".into_iter()", "///"],
+        duplicate_mitigation_pattern: &['(', ')', ',', ':', ';', '<', '>', '?', '[', ']', '{', '}'],
+        duplicate_mitigation_lines: &["///"],
+        duplicate_mitigation_regexps: &[
+            r"^[A-Za-z0-9_]*::?\s*[A-Za-z0-9_]*[,]?$",
+            r"^[A-Za-z0-9_]+\s*[.,]?$",
+            r"^\.?\s*[A-Za-z0-9_]+(?:\(\s*\)?)?$",
+            r"^let\s+(?:mut\s+)?[A-Za-z0-9_]+\s*=$",
+            r"^pub\s+[A-Za-z0-9_]*\s*:\s*[A-Za-z0-9_]*[,]?$",
+            r"^use\s+[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*;$",
+        ],
     },
     LanguageLinePattern {
         language_name: "C / C++ / Objective-C",
         extensions: &["c", "h", "cpp", "hpp", "cc", "hh", "cxx", "hxx", "m", "mm"],
-        duplicate_mitigation_pattern: &['(', ')', '{', '}', '[', ']', ';', ',', '?', ':', '<', '>'],
-        duplicate_mitigation_lines: &["#endif", "#else"],
+        duplicate_mitigation_pattern: &['(', ')', ',', ':', ';', '<', '>', '?', '[', ']', '{', '}'],
+        duplicate_mitigation_lines: &["#else", "#endif"],
+        duplicate_mitigation_regexps: &[],
     },
     LanguageLinePattern {
         language_name: "C#",
         extensions: &["cs"],
-        duplicate_mitigation_pattern: &['(', ')', '{', '}', '[', ']', ';', ',', '?', ':', '<', '>'],
-        duplicate_mitigation_lines: &["#endregion", "#else", "#endif"],
+        duplicate_mitigation_pattern: &['(', ')', ',', ':', ';', '<', '>', '?', '[', ']', '{', '}'],
+        duplicate_mitigation_lines: &["#else", "#endif", "#endregion"],
+        duplicate_mitigation_regexps: &[],
     },
     LanguageLinePattern {
         language_name: "Java / Kotlin / Scala",
         extensions: &["java", "kt", "kts", "scala", "sc"],
-        duplicate_mitigation_pattern: &['(', ')', '{', '}', '[', ']', ';', ',', '?', ':', '<', '>'],
+        duplicate_mitigation_pattern: &['(', ')', ',', ':', ';', '<', '>', '?', '[', ']', '{', '}'],
         duplicate_mitigation_lines: &[],
+        duplicate_mitigation_regexps: &[],
     },
     LanguageLinePattern {
         language_name: "Go",
         extensions: &["go"],
-        duplicate_mitigation_pattern: &['(', ')', '{', '}', '[', ']', ';', ',', ':'],
+        duplicate_mitigation_pattern: &['(', ')', ',', ':', ';', '[', ']', '{', '}'],
         duplicate_mitigation_lines: &[],
+        duplicate_mitigation_regexps: &[],
     },
     LanguageLinePattern {
         language_name: "Python",
         extensions: &["py", "pyw"],
-        duplicate_mitigation_pattern: &['(', ')', '{', '}', '[', ']', ';', ',', ':'],
+        duplicate_mitigation_pattern: &['(', ')', ',', ':', ';', '[', ']', '{', '}'],
         duplicate_mitigation_lines: &[],
+        duplicate_mitigation_regexps: &[],
     },
     LanguageLinePattern {
         language_name: "Ruby",
         extensions: &["rb"],
-        duplicate_mitigation_pattern: &['(', ')', '{', '}', '[', ']', ';', ',', '?', ':'],
+        duplicate_mitigation_pattern: &['(', ')', ',', ':', ';', '?', '[', ']', '{', '}'],
         duplicate_mitigation_lines: &["end"],
+        duplicate_mitigation_regexps: &[],
     },
     LanguageLinePattern {
         language_name: "PHP",
         extensions: &["php", "phtml"],
         duplicate_mitigation_pattern: &[
-            '(', ')', '{', '}', '[', ']', ';', ',', '?', ':', '<', '>', '/',
+            '(', ')', ',', '/', ':', ';', '<', '>', '?', '[', ']', '{', '}',
         ],
         duplicate_mitigation_lines: &[],
+        duplicate_mitigation_regexps: &[],
     },
     LanguageLinePattern {
         language_name: "Swift",
         extensions: &["swift"],
-        duplicate_mitigation_pattern: &['(', ')', '{', '}', '[', ']', ';', ',', '?', ':', '<', '>'],
+        duplicate_mitigation_pattern: &['(', ')', ',', ':', ';', '<', '>', '?', '[', ']', '{', '}'],
         duplicate_mitigation_lines: &[],
+        duplicate_mitigation_regexps: &[],
     },
     LanguageLinePattern {
         language_name: "Shell",
         extensions: &["sh", "bash", "zsh", "fish"],
-        duplicate_mitigation_pattern: &['(', ')', '{', '}', '[', ']', ';', '&', '|'],
-        duplicate_mitigation_lines: &["then", "do", "done", "fi", "else"],
+        duplicate_mitigation_pattern: &['&', '(', ')', ';', '[', ']', '{', '|', '}'],
+        duplicate_mitigation_lines: &["do", "done", "else", "fi", "then"],
+        duplicate_mitigation_regexps: &[],
     },
     LanguageLinePattern {
         language_name: "PowerShell",
         extensions: &["ps1", "psm1", "psd1"],
-        duplicate_mitigation_pattern: &['(', ')', '{', '}', '[', ']', ';', ',', '?', ':', '|'],
+        duplicate_mitigation_pattern: &['(', ')', ',', ':', ';', '?', '[', ']', '{', '|', '}'],
         duplicate_mitigation_lines: &[],
+        duplicate_mitigation_regexps: &[],
     },
     LanguageLinePattern {
         language_name: "HTML / XML",
         extensions: &["html", "htm", "xml", "xhtml", "svg"],
-        duplicate_mitigation_pattern: &['<', '>', '/'],
+        duplicate_mitigation_pattern: &['/', '<', '>'],
         duplicate_mitigation_lines: &[
-            "</div>",
-            "</span>",
-            "</section>",
             "</article>",
             "</body>",
+            "</div>",
             "</html>",
+            "</section>",
+            "</span>",
         ],
+        duplicate_mitigation_regexps: &[],
     },
     LanguageLinePattern {
         language_name: "CSS / SCSS / Sass / Less",
         extensions: &["css", "scss", "sass", "less"],
-        duplicate_mitigation_pattern: &['(', ')', '{', '}', '[', ']', ';', ',', ':'],
+        duplicate_mitigation_pattern: &['(', ')', ',', ':', ';', '[', ']', '{', '}'],
         duplicate_mitigation_lines: &[],
+        duplicate_mitigation_regexps: &[],
     },
     LanguageLinePattern {
         language_name: "SQL",
         extensions: &["sql"],
-        duplicate_mitigation_pattern: &['(', ')', ';', ',', ':'],
+        duplicate_mitigation_pattern: &['(', ')', ',', ':', ';'],
         duplicate_mitigation_lines: &["BEGIN", "END"],
+        duplicate_mitigation_regexps: &[],
     },
     LanguageLinePattern {
         language_name: "YAML / JSON / TOML",
         extensions: &["yaml", "yml", "json", "toml"],
-        duplicate_mitigation_pattern: &['(', ')', '{', '}', '[', ']', ';', ',', '?', ':', '<', '>'],
+        duplicate_mitigation_pattern: &['(', ')', ',', ':', ';', '<', '>', '?', '[', ']', '{', '}'],
         duplicate_mitigation_lines: &["jobs:", "on:"],
+        duplicate_mitigation_regexps: &[],
     },
 ];
 
@@ -141,6 +166,7 @@ struct DuplicateMitigationLineRegistry {
 struct DuplicateMitigationPatterns {
     lines_by_hash: HashMap<u128, Vec<&'static str>>,
     character_pattern: Vec<char>,
+    regexps: Vec<Regex>,
 }
 
 static DUPLICATE_MITIGATION_LINE_REGISTRY: OnceLock<DuplicateMitigationLineRegistry> =
@@ -178,6 +204,10 @@ fn registry() -> &'static DuplicateMitigationLineRegistry {
                     &mut patterns.character_pattern,
                     language.duplicate_mitigation_pattern,
                 );
+                register_duplicate_mitigation_regexps(
+                    &mut patterns.regexps,
+                    language.duplicate_mitigation_regexps,
+                );
             }
         }
         DuplicateMitigationLineRegistry { by_extension }
@@ -188,6 +218,7 @@ impl DuplicateMitigationPatterns {
     fn matches_line(&self, normalized_line: &str, hash: u128) -> bool {
         self.matches_registered_line(normalized_line, hash)
             || matches_duplicate_mitigation_pattern(normalized_line, &self.character_pattern)
+            || matches_duplicate_mitigation_regexps(normalized_line, &self.regexps)
     }
 
     fn matches_registered_line(&self, normalized_line: &str, hash: u128) -> bool {
@@ -220,11 +251,30 @@ fn register_duplicate_mitigation_pattern(
     }
 }
 
+fn register_duplicate_mitigation_regexps(
+    regexps: &mut Vec<Regex>,
+    patterns: &'static [&'static str],
+) {
+    for &pattern in patterns {
+        if !regexps.iter().any(|regexp| regexp.as_str() == pattern) {
+            regexps.push(Regex::new(pattern).expect("duplicate mitigation regexp must compile"));
+        }
+    }
+}
+
 fn matches_duplicate_mitigation_pattern(line: &str, character_pattern: &[char]) -> bool {
     !character_pattern.is_empty()
         && line
             .chars()
             .all(|character| character.is_whitespace() || character_pattern.contains(&character))
+}
+
+fn matches_duplicate_mitigation_regexps(line: &str, regexps: &[Regex]) -> bool {
+    regexps.iter().any(|regexp| {
+        regexp
+            .find(line)
+            .is_some_and(|matched| matched.start() == 0 && matched.end() == line.len())
+    })
 }
 
 #[cfg(test)]
@@ -259,6 +309,20 @@ mod tests {
         let line = "} \t);";
         let hash = hash_normalized_line(line);
         assert_eq!(classify_line("ts", line, hash), LineStatus::BlockOnly);
+    }
+
+    #[test]
+    fn assigns_block_only_status_from_regexps() {
+        let line = ".update()";
+        let hash = hash_normalized_line(line);
+        assert_eq!(classify_line("rs", line, hash), LineStatus::BlockOnly);
+    }
+
+    #[test]
+    fn regexps_must_match_the_full_line() {
+        let line = ".update()?.await";
+        let hash = hash_normalized_line(line);
+        assert_eq!(classify_line("rs", line, hash), LineStatus::Comparison);
     }
 
     #[test]
