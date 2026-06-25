@@ -317,20 +317,20 @@ mod tests {
                 "a.ts",
                 "ts",
                 &[
+                    ("const x = 1;", LineStatus::Comparison),
+                    ("const uniqueA = true;", LineStatus::Comparison),
                     ("const longerValue = computeOne();", LineStatus::Comparison),
                     ("return longerValue;", LineStatus::Comparison),
-                    ("const uniqueA = true;", LineStatus::Comparison),
-                    ("const x = 1;", LineStatus::Comparison),
                 ],
             ),
             processed_file(
                 "b.ts",
                 "ts",
                 &[
+                    ("const x = 1;", LineStatus::Comparison),
+                    ("const uniqueB = true;", LineStatus::Comparison),
                     ("const longerValue = computeOne();", LineStatus::Comparison),
                     ("return longerValue;", LineStatus::Comparison),
-                    ("const uniqueB = true;", LineStatus::Comparison),
-                    ("const x = 1;", LineStatus::Comparison),
                 ],
             ),
         ];
