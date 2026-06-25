@@ -142,6 +142,9 @@ fn expand_pair(files: &[ProcessedFile], left: LineRef, right: LineRef) -> Option
         left_end += 1;
         right_end += 1;
     }
+    if left.file_index == right.file_index && left_start <= right_end && right_start <= left_end {
+        return None;
+    }
     let normalized_lines = files[left.file_index].lines[left_start..=left_end]
         .iter()
         .map(|line| line.normalized_text.clone())
@@ -312,5 +315,30 @@ mod tests {
             blocks[0].normalized_lines,
             ["if (ready) {", "}", "return value;"]
         );
+    }
+
+    #[test]
+    fn rejects_overlapping_duplicate_ranges_in_the_same_file() {
+        let files = vec![processed_file(
+            "a.ts",
+            "ts",
+            &[
+                ("const value = one;", LineStatus::Comparison),
+                ("const value = one;", LineStatus::Comparison),
+                ("const value = one;", LineStatus::Comparison),
+            ],
+        )];
+        let blocks = detect_duplicate_blocks(&files);
+        assert!(!blocks.iter().any(|block| {
+            block.normalized_lines == ["const value = one;", "const value = one;"]
+                && block
+                    .occurrences
+                    .iter()
+                    .any(|occurrence| occurrence.start_line == 1)
+                && block
+                    .occurrences
+                    .iter()
+                    .any(|occurrence| occurrence.start_line == 2)
+        }));
     }
 }
