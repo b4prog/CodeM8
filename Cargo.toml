@@ -1,0 +1,13 @@
+[package]
+name = "codem8"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "A deterministic source code analysis CLI for duplicate code reports."
+repository = "https://github.com/b4prog/CodeM8"
+keywords = ["cli", "duplicate-detection", "source-code", "analysis"]
+categories = ["command-line-utilities", "development-tools"]
+
+[dependencies]
+regex = "1"
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
