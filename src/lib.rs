@@ -115,14 +115,17 @@ mod tests {
             "const value = computeValue(input);\nif (value === undefined) {\nreturn defaultValue;\n}\n",
         );
         let output = run_in(&project, &["--report-duplicate"]).expect("report succeeds");
+        let expected_extensions = language::supported_file_extensions().join(", ");
         assert_eq!(
             output,
-            concat!(
+            [
                 "Duplicate Code Report\n",
                 "=====================\n",
                 "\n",
                 "Analyzed files: 2\n",
-                "Analyzed extensions: ts\n",
+                "Analyzed extensions: ",
+                &expected_extensions,
+                "\n",
                 "Duplicate blocks found: 1\n",
                 "\n",
                 "#1 Weight: 324\n",
@@ -139,7 +142,8 @@ mod tests {
                 "  if (value === undefined) {\n",
                 "  return defaultValue;\n",
                 "  }\n",
-            )
+            ]
+            .concat()
         );
     }
 
@@ -160,7 +164,8 @@ mod tests {
         project.write("src/a.js", "const value = one;\n");
         project.write("src/b.js", "const value = one;\n");
         let default_output = run_in(&project, &["--report-duplicate"]).expect("report succeeds");
-        assert!(default_output.contains("Analyzed files: 0"));
+        assert!(default_output.contains("Analyzed files: 2"));
+        assert!(default_output.contains("Duplicate blocks found: 1"));
         let js_output = run_in(&project, &["--report-duplicate", "-file-extension=js"])
             .expect("report succeeds");
         assert!(js_output.contains("Analyzed files: 2"));

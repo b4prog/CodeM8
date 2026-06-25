@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use crate::error::{CodeM8Error, Result};
+use crate::language::supported_file_extensions;
 
-const DEFAULT_FILE_EXTENSIONS: &[&str] = &["ts"];
 const HELP_TEXT: &str = "\
 CodeM8 - deterministic source code analysis reports.
 
@@ -22,7 +22,7 @@ OPTIONS:
   -file-extension=<extensions>
   --file-extension=<extensions>
       Comma-separated source file extensions to analyze.
-      Defaults to: ts
+      Defaults to all extensions registered in LANGUAGE_PATTERNS.
       Examples: -file-extension=ts,tsx,js,jsx
 
   -files=<paths>
@@ -128,12 +128,7 @@ where
     }
     Ok(CliConfig {
         report_duplicate,
-        file_extensions: file_extensions.unwrap_or_else(|| {
-            DEFAULT_FILE_EXTENSIONS
-                .iter()
-                .map(std::string::ToString::to_string)
-                .collect()
-        }),
+        file_extensions: file_extensions.unwrap_or_else(supported_file_extensions),
         files,
     })
 }
@@ -220,7 +215,7 @@ mod tests {
     fn parses_default_duplicate_report_config() {
         let config = parse_args(["--report-duplicate"]).expect("config parses");
         assert!(config.report_duplicate);
-        assert_eq!(config.file_extensions, ["ts"]);
+        assert_eq!(config.file_extensions, supported_file_extensions());
         assert_eq!(config.files, None);
     }
 

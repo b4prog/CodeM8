@@ -119,6 +119,19 @@ pub const LANGUAGE_PATTERNS: &[LanguageLinePattern] = &[
     },
 ];
 
+#[must_use]
+pub fn supported_file_extensions() -> Vec<String> {
+    let mut extensions = Vec::new();
+    for language in LANGUAGE_PATTERNS {
+        for &extension in language.extensions {
+            if !extensions.iter().any(|selected| selected == extension) {
+                extensions.push(extension.to_string());
+            }
+        }
+    }
+    extensions
+}
+
 #[derive(Debug)]
 struct DuplicateMitigationLineRegistry {
     by_extension: HashMap<&'static str, DuplicateMitigationPatterns>,
@@ -258,5 +271,15 @@ mod tests {
     #[test]
     fn empty_character_pattern_does_not_match() {
         assert!(!matches_duplicate_mitigation_pattern("}", &[]));
+    }
+
+    #[test]
+    fn collects_supported_file_extensions_from_language_patterns() {
+        let extensions = supported_file_extensions();
+        for language in LANGUAGE_PATTERNS {
+            for extension in language.extensions {
+                assert!(extensions.iter().any(|selected| selected == extension));
+            }
+        }
     }
 }
