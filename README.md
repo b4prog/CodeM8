@@ -14,13 +14,25 @@ prints a stable plain-text report sorted by duplicate weight.
 
 ## Installation
 
-Build from source with Cargo:
+Install `codem8` from the GitHub source with Cargo:
+
+```bash
+cargo install --git https://github.com/b4prog/CodeM8 codem8
+```
+
+Build from a local checkout with Cargo:
 
 ```bash
 cargo build --release
 ```
 
-Run the local binary:
+Install from a local checkout:
+
+```bash
+cargo install --path .
+```
+
+Run from the local checkout without installing:
 
 ```bash
 cargo run -- --report-duplicate
