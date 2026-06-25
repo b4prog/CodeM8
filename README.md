@@ -111,7 +111,8 @@ Run the full local verification set:
 
 ```bash
 cargo fmt --all -- --check
-cargo build --all-targets
+cargo clippy --workspace --all-targets --all-features -- -D warnings -W clippy::too_many_lines -W clippy::too_many_arguments -W clippy::type_complexity -W clippy::excessive_nesting -W clippy::cognitive_complexity
+rtk cargo build --locked --all-targets
 cargo test --all-targets
 ```
 
