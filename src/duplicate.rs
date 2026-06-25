@@ -292,6 +292,58 @@ mod tests {
     }
 
     #[test]
+    fn ignores_matching_hashes_with_different_text() {
+        let mut files = vec![
+            processed_file(
+                "a.ts",
+                "ts",
+                &[("const value = one;", LineStatus::Comparison)],
+            ),
+            processed_file(
+                "b.ts",
+                "ts",
+                &[("const value = two;", LineStatus::Comparison)],
+            ),
+        ];
+        files[1].lines[0].hash = files[0].lines[0].hash;
+        let blocks = detect_duplicate_blocks(&files);
+        assert!(blocks.is_empty());
+    }
+
+    #[test]
+    fn sorts_duplicate_blocks_by_weight() {
+        let files = vec![
+            processed_file(
+                "a.ts",
+                "ts",
+                &[
+                    ("const longerValue = computeOne();", LineStatus::Comparison),
+                    ("return longerValue;", LineStatus::Comparison),
+                    ("const uniqueA = true;", LineStatus::Comparison),
+                    ("const x = 1;", LineStatus::Comparison),
+                ],
+            ),
+            processed_file(
+                "b.ts",
+                "ts",
+                &[
+                    ("const longerValue = computeOne();", LineStatus::Comparison),
+                    ("return longerValue;", LineStatus::Comparison),
+                    ("const uniqueB = true;", LineStatus::Comparison),
+                    ("const x = 1;", LineStatus::Comparison),
+                ],
+            ),
+        ];
+        let blocks = detect_duplicate_blocks(&files);
+        assert!(blocks.len() >= 2);
+        assert_eq!(
+            blocks[0].normalized_lines,
+            ["const longerValue = computeOne();", "return longerValue;"]
+        );
+        assert!(blocks[0].weight >= blocks[1].weight);
+    }
+
+    #[test]
     fn ignores_single_line_duplicates_that_are_only_block_only_lines() {
         let files = vec![
             processed_file("a.ts", "ts", &[("}", LineStatus::BlockOnly)]),

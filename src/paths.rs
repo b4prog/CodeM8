@@ -22,3 +22,29 @@ pub fn normalize_display_path(path: &Path) -> PathBuf {
         normalized
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn formats_paths_with_forward_slashes() {
+        assert_eq!(
+            format_path(Path::new("src\\nested\\a.ts")),
+            "src/nested/a.ts"
+        );
+    }
+
+    #[test]
+    fn normalizes_display_paths_without_losing_parent_segments() {
+        assert_eq!(
+            normalize_display_path(Path::new("./src/../a.ts")),
+            PathBuf::from("src").join("..").join("a.ts")
+        );
+    }
+
+    #[test]
+    fn normalizes_empty_display_path_to_current_directory() {
+        assert_eq!(normalize_display_path(Path::new(".")), PathBuf::from("."));
+    }
+}

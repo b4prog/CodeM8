@@ -96,4 +96,23 @@ mod tests {
         assert_eq!(processed.lines[1].status, LineStatus::BlockOnly);
         fs::remove_file(path).expect("cleanup");
     }
+
+    #[test]
+    fn returns_clear_error_for_invalid_utf8() {
+        let path = std::env::temp_dir().join(format!(
+            "codem8-line-invalid-utf8-{}.ts",
+            std::process::id()
+        ));
+        fs::write(&path, [0xff, b'\n']).expect("write invalid source file");
+        let source = SourceFile {
+            path: path.clone(),
+            display_path: "invalid.ts".into(),
+            extension: "ts".to_string(),
+        };
+        let error = process_source_file(&source).expect_err("invalid UTF-8 fails");
+        assert!(error
+            .to_string()
+            .contains("could not read invalid.ts as UTF-8 text"));
+        fs::remove_file(path).expect("cleanup");
+    }
 }

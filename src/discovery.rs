@@ -225,4 +225,17 @@ mod tests {
         assert_eq!(format_path(&files[0].display_path), "a.ts");
         fs::remove_dir_all(root).expect("cleanup");
     }
+
+    #[test]
+    fn explicit_files_reject_directories() {
+        let root = temp_dir("explicit-directory");
+        fs::create_dir_all(root.join("src")).expect("create explicit directory");
+        let error =
+            discover_source_files(&root, &["ts".to_string()], Some(&[PathBuf::from("src")]))
+                .expect_err("directory explicit file fails");
+        assert!(error
+            .to_string()
+            .contains("explicit file is a directory: src"));
+        fs::remove_dir_all(root).expect("cleanup");
+    }
 }

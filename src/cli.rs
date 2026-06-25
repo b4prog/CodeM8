@@ -155,9 +155,45 @@ mod tests {
     }
 
     #[test]
+    fn rejects_extensions_with_path_separators() {
+        let error = parse_file_extensions("src/ts").expect_err("path-like extension fails");
+        assert!(error
+            .to_string()
+            .contains("must not contain path separators"));
+    }
+
+    #[test]
     fn rejects_missing_report_switch() {
         let error = parse_args(["-file-extension=rs"]).expect_err("missing report fails");
         assert!(error.to_string().contains("no report switch provided"));
+    }
+
+    #[test]
+    fn rejects_unknown_arguments() {
+        let error = parse_args(["--report-duplicate", "--verbose"]).expect_err("unknown arg fails");
+        assert!(error.to_string().contains("unknown argument: --verbose"));
+    }
+
+    #[test]
+    fn rejects_repeated_file_extension_arguments() {
+        let error = parse_args([
+            "--report-duplicate",
+            "-file-extension=ts",
+            "--file-extension=js",
+        ])
+        .expect_err("repeated extensions fail");
+        assert!(error
+            .to_string()
+            .contains("file extensions were provided more than once"));
+    }
+
+    #[test]
+    fn rejects_repeated_explicit_file_arguments() {
+        let error = parse_args(["--report-duplicate", "-files=a.ts", "--files=b.ts"])
+            .expect_err("repeated explicit files fail");
+        assert!(error
+            .to_string()
+            .contains("explicit files were provided more than once"));
     }
 
     #[test]
@@ -167,5 +203,13 @@ mod tests {
             files,
             [PathBuf::from("src/a.ts"), PathBuf::from("./src/b.ts")]
         );
+    }
+
+    #[test]
+    fn rejects_empty_explicit_file_paths() {
+        let error = parse_file_list("src/a.ts, ").expect_err("empty explicit file fails");
+        assert!(error
+            .to_string()
+            .contains("file path values must not be empty"));
     }
 }
