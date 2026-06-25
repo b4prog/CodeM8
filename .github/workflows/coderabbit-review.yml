@@ -53,23 +53,27 @@ jobs:
             return fetchReviews(page + 1, reviews.concat(pageReviews));
           }
 
-          const reviews = await fetchReviews();
-          const codeRabbitReviews = reviews
-            .filter((review) => review.user?.login === "coderabbitai[bot]")
-            .filter((review) => review.commit_id === headSha)
-            .sort((left, right) => new Date(left.submitted_at) - new Date(right.submitted_at));
+          (async () => {
+            const reviews = await fetchReviews();
+            const codeRabbitReviews = reviews
+              .filter((review) => review.user?.login === "coderabbitai[bot]")
+              .filter((review) => review.commit_id === headSha)
+              .sort((left, right) => new Date(left.submitted_at) - new Date(right.submitted_at));
 
-          const latestReview = codeRabbitReviews.at(-1);
-          if (!latestReview) {
-            console.error(`CodeRabbit has not submitted a review for ${headSha}.`);
+            const latestReview = codeRabbitReviews.at(-1);
+            if (!latestReview) {
+              console.error(`CodeRabbit has not submitted a review for ${headSha}.`);
+              process.exit(1);
+            }
+
+            if (latestReview.state === "CHANGES_REQUESTED") {
+              console.error("CodeRabbit requested changes on this pull request.");
+              process.exit(1);
+            }
+
+            console.log(`CodeRabbit review state for ${headSha}: ${latestReview.state}`);
+          })().catch((error) => {
+            console.error(error);
             process.exit(1);
-          }
-
-          if (latestReview.state === "CHANGES_REQUESTED") {
-            console.error("CodeRabbit requested changes on this pull request.");
-            process.exit(1);
-          }
-
-          console.log(`CodeRabbit review state for ${headSha}: ${latestReview.state}`);
+          });
           NODE
-
