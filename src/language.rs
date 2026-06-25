@@ -151,17 +151,26 @@ fn registry() -> &'static BlockOnlyRegistry {
             HashMap::new();
         for language in LANGUAGE_PATTERNS {
             for extension in language.extensions {
-                let patterns_by_hash = by_extension.entry(extension).or_default();
-                for line in language.block_only_lines {
-                    patterns_by_hash
-                        .entry(hash_normalized_line(line))
-                        .or_default()
-                        .push(line);
-                }
+                register_block_only_lines(
+                    by_extension.entry(extension).or_default(),
+                    language.block_only_lines,
+                );
             }
         }
         BlockOnlyRegistry { by_extension }
     })
+}
+
+fn register_block_only_lines(
+    patterns_by_hash: &mut HashMap<u128, Vec<&'static str>>,
+    lines: &'static [&'static str],
+) {
+    for &line in lines {
+        patterns_by_hash
+            .entry(hash_normalized_line(line))
+            .or_default()
+            .push(line);
+    }
 }
 
 #[cfg(test)]

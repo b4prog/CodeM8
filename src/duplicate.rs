@@ -64,20 +64,7 @@ pub fn detect_duplicate_blocks(files: &[ProcessedFile]) -> Vec<DuplicateBlock> {
             if comparison_refs.len() < 2 {
                 continue;
             }
-            for left_index in 0..comparison_refs.len() {
-                for right_index in (left_index + 1)..comparison_refs.len() {
-                    let left = comparison_refs[left_index];
-                    let right = comparison_refs[right_index];
-                    let Some(candidate) = expand_pair(files, left, right) else {
-                        continue;
-                    };
-                    let occurrences = blocks_by_lines
-                        .entry(candidate.normalized_lines)
-                        .or_default();
-                    occurrences.insert(candidate.left_occurrence);
-                    occurrences.insert(candidate.right_occurrence);
-                }
-            }
+            collect_candidates(files, comparison_refs, &mut blocks_by_lines);
         }
     }
     let mut duplicate_blocks = blocks_by_lines
@@ -116,6 +103,33 @@ struct CandidateBlock {
     normalized_lines: Vec<String>,
     left_occurrence: OccurrenceKey,
     right_occurrence: OccurrenceKey,
+}
+
+fn collect_candidates(
+    files: &[ProcessedFile],
+    comparison_refs: &[LineRef],
+    blocks_by_lines: &mut HashMap<Vec<String>, BTreeSet<OccurrenceKey>>,
+) {
+    for left_index in 0..comparison_refs.len() {
+        let left = comparison_refs[left_index];
+        for &right in &comparison_refs[(left_index + 1)..] {
+            let Some(candidate) = expand_pair(files, left, right) else {
+                continue;
+            };
+            store_candidate(candidate, blocks_by_lines);
+        }
+    }
+}
+
+fn store_candidate(
+    candidate: CandidateBlock,
+    blocks_by_lines: &mut HashMap<Vec<String>, BTreeSet<OccurrenceKey>>,
+) {
+    let occurrences = blocks_by_lines
+        .entry(candidate.normalized_lines)
+        .or_default();
+    occurrences.insert(candidate.left_occurrence);
+    occurrences.insert(candidate.right_occurrence);
 }
 
 fn expand_pair(files: &[ProcessedFile], left: LineRef, right: LineRef) -> Option<CandidateBlock> {
