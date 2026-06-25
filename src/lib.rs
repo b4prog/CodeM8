@@ -43,7 +43,7 @@ where
                 duplicate_blocks,
             };
             writer
-                .write_all(report::render_duplicate_report(&report).as_bytes())
+                .write_all(report::render_duplicate_report(&report, config.verbose).as_bytes())
                 .map_err(|error| {
                     CodeM8Error::new(format!("could not write report output: {error}"))
                 })?;
@@ -128,22 +128,41 @@ mod tests {
                 "\n",
                 "Duplicate blocks found: 1\n",
                 "\n",
-                "#1 Weight: 324\n",
-                "Lines: 4\n",
-                "Characters: 81\n",
-                "Occurrences: 2\n",
-                "\n",
-                "Locations:\n",
-                "- src/a.ts:1-4\n",
-                "- src/b.ts:1-4\n",
-                "\n",
+                "#1\n",
                 "Code:\n",
                 "  const value = computeValue(input);\n",
                 "  if (value === undefined) {\n",
                 "  return defaultValue;\n",
                 "  }\n",
+                "\n",
+                "Locations:\n",
+                "- src/a.ts:1-4\n",
+                "- src/b.ts:1-4\n",
             ]
             .concat()
+        );
+    }
+
+    #[test]
+    fn verbose_duplicate_report_includes_metrics_without_characters() {
+        let project = TempProject::new("verbose");
+        project.write(
+            "src/a.ts",
+            "const value = computeValue(input);\nreturn value;\n",
+        );
+        project.write(
+            "src/b.ts",
+            "const value = computeValue(input);\nreturn value;\n",
+        );
+        let output =
+            run_in(&project, &["--report-duplicate", "--verbose"]).expect("report succeeds");
+        assert!(output.contains("Weight:"));
+        assert!(output.contains("Lines: 2"));
+        assert!(output.contains("Occurrences: 2"));
+        assert!(!output.contains("Characters:"));
+        assert!(
+            output.find("Code:").expect("code section exists")
+                < output.find("Locations:").expect("locations section exists")
         );
     }
 

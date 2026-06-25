@@ -31,6 +31,9 @@ OPTIONS:
       discovering files from the current directory.
       Example: -files=src/a.ts,src/b.js
 
+  --verbose
+      Include duplicate block metrics in report output.
+
 DUPLICATE REPORT PURPOSE:
   The duplicate report helps you find repeated code that may be worth
   refactoring, reviewing, or consolidating. It lists each duplicated block with
@@ -52,6 +55,7 @@ pub enum CliCommand {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CliConfig {
     pub report_duplicate: bool,
+    pub verbose: bool,
     pub file_extensions: Vec<String>,
     pub files: Option<Vec<PathBuf>>,
 }
@@ -91,12 +95,15 @@ where
     S: Into<String>,
 {
     let mut report_duplicate = false;
+    let mut verbose = false;
     let mut file_extensions = None;
     let mut files = None;
     for arg in args {
         let arg = arg.into();
         if arg == "--report-duplicate" {
             report_duplicate = true;
+        } else if arg == "--verbose" {
+            verbose = true;
         } else if let Some(value) = arg
             .strip_prefix("-file-extension=")
             .or_else(|| arg.strip_prefix("--file-extension="))
@@ -128,6 +135,7 @@ where
     }
     Ok(CliConfig {
         report_duplicate,
+        verbose,
         file_extensions: file_extensions.unwrap_or_else(supported_file_extensions),
         files,
     })
@@ -205,6 +213,7 @@ mod tests {
     fn exposes_detailed_help_text() {
         assert!(help_text().contains("USAGE:"));
         assert!(help_text().contains("--report-duplicate"));
+        assert!(help_text().contains("--verbose"));
         assert!(help_text().contains("-file-extension=<extensions>"));
         assert!(help_text().contains("-files=<paths>"));
         assert!(help_text().contains("helps you find repeated code"));
@@ -215,8 +224,16 @@ mod tests {
     fn parses_default_duplicate_report_config() {
         let config = parse_args(["--report-duplicate"]).expect("config parses");
         assert!(config.report_duplicate);
+        assert!(!config.verbose);
         assert_eq!(config.file_extensions, supported_file_extensions());
         assert_eq!(config.files, None);
+    }
+
+    #[test]
+    fn parses_verbose_duplicate_report_config() {
+        let config = parse_args(["--report-duplicate", "--verbose"]).expect("config parses");
+        assert!(config.report_duplicate);
+        assert!(config.verbose);
     }
 
     #[test]
@@ -254,8 +271,8 @@ mod tests {
 
     #[test]
     fn rejects_unknown_arguments() {
-        let error = parse_args(["--report-duplicate", "--verbose"]).expect_err("unknown arg fails");
-        assert!(error.to_string().contains("unknown argument: --verbose"));
+        let error = parse_args(["--report-duplicate", "--unknown"]).expect_err("unknown arg fails");
+        assert!(error.to_string().contains("unknown argument: --unknown"));
         assert!(!error.should_show_help());
     }
 

@@ -22,7 +22,7 @@ pub const LANGUAGE_PATTERNS: &[LanguageLinePattern] = &[
         language_name: "Rust",
         extensions: &["rs"],
         duplicate_mitigation_pattern: &['(', ')', '{', '}', '[', ']', ';', ',', '?', ':', '<', '>'],
-        duplicate_mitigation_lines: &[".into_iter()"],
+        duplicate_mitigation_lines: &[".into_iter()", "///"],
     },
     LanguageLinePattern {
         language_name: "C / C++ / Objective-C",
@@ -114,8 +114,8 @@ pub const LANGUAGE_PATTERNS: &[LanguageLinePattern] = &[
     LanguageLinePattern {
         language_name: "YAML / JSON / TOML",
         extensions: &["yaml", "yml", "json", "toml"],
-        duplicate_mitigation_pattern: &['{', '}', '[', ']', ','],
-        duplicate_mitigation_lines: &[],
+        duplicate_mitigation_pattern: &['(', ')', '{', '}', '[', ']', ';', ',', '?', ':', '<', '>'],
+        duplicate_mitigation_lines: &["jobs:", "on:"],
     },
 ];
 

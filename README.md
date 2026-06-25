@@ -58,6 +58,12 @@ Analyze an explicit list of files instead of recursively discovering files:
 codem8 --report-duplicate -file-extension=ts,js -files=src/a.ts,src/b.js
 ```
 
+Include duplicate block metrics:
+
+```bash
+codem8 --report-duplicate --verbose
+```
+
 ## Duplicate Report
 
 By default, CodeM8 analyzes `.ts` files. Recursive discovery skips common
@@ -78,6 +84,11 @@ Duplicate block weight is calculated as:
 
 Reports are sorted deterministically by descending weight, then by line count,
 character count, first location, and normalized block text.
+
+By default, each duplicate block prints the duplicated code before its
+locations. Use `--verbose` to also show weight, line count, and occurrence
+count. Character counts are used internally for scoring and sorting, but are
+not printed.
 
 ## Language Heuristics
 
