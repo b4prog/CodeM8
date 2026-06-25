@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -44,6 +45,7 @@ fn discover_explicit_files(
     files: &[PathBuf],
 ) -> Result<Vec<SourceFile>> {
     let mut source_files = Vec::new();
+    let mut seen_paths = HashSet::new();
     for file in files {
         let absolute_input = file.is_absolute();
         let path = if absolute_input {
@@ -78,8 +80,13 @@ fn discover_explicit_files(
         let Some(extension) = selected_extension(&path, extensions) else {
             continue;
         };
+        let canonical_path = fs::canonicalize(&path)
+            .map_err(|error| CodeM8Error::io(&path, "canonicalize explicit file", error))?;
+        if !seen_paths.insert(canonical_path.clone()) {
+            continue;
+        }
         source_files.push(SourceFile {
-            path,
+            path: canonical_path,
             display_path: normalize_display_path(file),
             extension,
         });
@@ -190,6 +197,27 @@ mod tests {
         )
         .expect("discover");
         assert_eq!(files.len(), 1);
+        assert_eq!(format_path(&files[0].display_path), "a.ts");
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn explicit_files_deduplicate_resolved_paths() {
+        let root = temp_dir("explicit-dedup");
+        fs::write(root.join("a.ts"), "").expect("write ts");
+        let absolute = fs::canonicalize(root.join("a.ts")).expect("canonicalize ts");
+        let files = discover_source_files(
+            &root,
+            &["ts".to_string()],
+            Some(&[
+                PathBuf::from("a.ts"),
+                PathBuf::from(".").join("a.ts"),
+                absolute.clone(),
+            ]),
+        )
+        .expect("discover");
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, absolute);
         assert_eq!(format_path(&files[0].display_path), "a.ts");
         fs::remove_dir_all(root).expect("cleanup");
     }
