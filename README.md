@@ -58,6 +58,13 @@ Analyze an explicit list of files instead of recursively discovering files:
 codem8 --report-duplicate -file-extension=ts,js -files=src/a.ts,src/b.js
 ```
 
+Analyze files changed on the current local Git branch compared to the origin
+base branch:
+
+```bash
+codem8 --report-duplicate -git-branch
+```
+
 Include duplicate block metrics:
 
 ```bash
@@ -75,6 +82,12 @@ Every non-empty line is normalized with Rust string trimming, so leading and
 trailing Unicode whitespace are removed before hashing and comparison. Empty
 trimmed lines are ignored. CodeM8 currently expects UTF-8 source files; invalid
 UTF-8 produces a clear error rather than lossy output.
+
+Use `-git-branch` to analyze only files changed on the current local branch
+compared to the origin base branch. CodeM8 resolves that base from `origin/HEAD`
+with `origin/main` and `origin/master` fallbacks. This includes committed,
+staged, unstaged, and untracked files that still exist in the worktree. The
+option requires a Git repository and cannot be combined with `-files`.
 
 Duplicate block weight is calculated as:
 

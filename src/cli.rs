@@ -1,11 +1,11 @@
+use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use crate::error::{CodeM8Error, Result};
 use crate::language::supported_file_extensions;
 
-const HELP_TEXT: &str = "\
-CodeM8 - deterministic source code analysis reports.
-
+const CARGO_LOCK: &str = include_str!("../Cargo.lock");
+const HELP_TEXT_BODY: &str = "\
 USAGE:
   codem8 help
   codem8 --report-duplicate [OPTIONS]
@@ -29,6 +29,11 @@ OPTIONS:
       discovering files from the current directory.
       Example: -files=src/a.ts,src/b.js
 
+  -git-branch
+      Analyze files changed on the current local Git branch compared to the
+      origin base branch, including committed, staged, unstaged, and untracked
+      files. Cannot be combined with -files.
+
   -verbose
       Include duplicate block metrics in report output.
 
@@ -42,7 +47,14 @@ EXAMPLES:
   codem8 --report-duplicate
   codem8 --report-duplicate -file-extension=ts,tsx,js,jsx
   codem8 --report-duplicate -file-extension=ts,js -files=src/a.ts,src/b.js
+  codem8 --report-duplicate -git-branch
 ";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CargoLockPackage<'a> {
+    name: &'a str,
+    version: &'a str,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CliCommand {
@@ -56,11 +68,20 @@ pub struct CliConfig {
     pub verbose: bool,
     pub file_extensions: Vec<String>,
     pub files: Option<Vec<PathBuf>>,
+    pub git_branch: bool,
 }
 
 #[must_use]
-pub const fn help_text() -> &'static str {
-    HELP_TEXT
+pub fn help_text() -> String {
+    let version = codem8_version_from_cargo_lock().unwrap_or("unknown");
+    let mut output = String::new();
+    let _ = writeln!(
+        output,
+        "CodeM8 {version} - deterministic source code analysis reports."
+    );
+    output.push('\n');
+    output.push_str(HELP_TEXT_BODY);
+    output
 }
 
 /// Parses command-line arguments into a CLI command.
@@ -96,12 +117,20 @@ where
     let mut verbose = false;
     let mut file_extensions = None;
     let mut files = None;
+    let mut git_branch = false;
     for arg in args {
         let arg = arg.into();
         if arg == "--report-duplicate" {
             report_duplicate = true;
         } else if arg == "-verbose" {
             verbose = true;
+        } else if arg == "-git-branch" {
+            if git_branch {
+                return Err(CodeM8Error::new(
+                    "git branch mode was provided more than once",
+                ));
+            }
+            git_branch = true;
         } else if let Some(value) = arg.strip_prefix("-file-extension=") {
             if file_extensions.is_some() {
                 return Err(CodeM8Error::new(
@@ -125,11 +154,17 @@ where
             "no report switch provided; pass --report-duplicate",
         ));
     }
+    if git_branch && files.is_some() {
+        return Err(CodeM8Error::new(
+            "git branch mode cannot be combined with explicit files",
+        ));
+    }
     Ok(CliConfig {
         report_duplicate,
         verbose,
         file_extensions: file_extensions.unwrap_or_else(supported_file_extensions),
         files,
+        git_branch,
     })
 }
 
@@ -191,6 +226,30 @@ fn is_help_argument(arg: &str) -> bool {
     matches!(arg, "help" | "-h")
 }
 
+fn codem8_version_from_cargo_lock() -> Option<&'static str> {
+    cargo_lock_packages(CARGO_LOCK)
+        .find(|package| package.name == "codem8")
+        .map(|package| package.version)
+}
+
+fn cargo_lock_packages(lockfile: &str) -> impl Iterator<Item = CargoLockPackage<'_>> {
+    lockfile.split("[[package]]").filter_map(cargo_lock_package)
+}
+
+fn cargo_lock_package(section: &str) -> Option<CargoLockPackage<'_>> {
+    let name = cargo_lock_value(section, "name")?;
+    let version = cargo_lock_value(section, "version")?;
+    Some(CargoLockPackage { name, version })
+}
+
+fn cargo_lock_value<'a>(section: &'a str, key: &str) -> Option<&'a str> {
+    let prefix = format!("{key} = \"");
+    section
+        .lines()
+        .map(str::trim)
+        .find_map(|line| line.strip_prefix(&prefix)?.strip_suffix('"'))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -209,16 +268,42 @@ mod tests {
 
     #[test]
     fn exposes_detailed_help_text() {
-        assert!(help_text().contains("USAGE:"));
-        assert!(help_text().contains("--report-duplicate"));
-        assert!(help_text().contains("-verbose"));
-        assert!(help_text().contains("-file-extension=<extensions>"));
-        assert!(help_text().contains("-files=<paths>"));
-        assert!(!help_text().contains("--verbose"));
-        assert!(!help_text().contains("--file-extension=<extensions>"));
-        assert!(!help_text().contains("--files=<paths>"));
-        assert!(help_text().contains("helps you find repeated code"));
-        assert!(!help_text().contains("Duplicate weight"));
+        let help = help_text();
+        assert!(help.contains("USAGE:"));
+        assert!(help.contains("--report-duplicate"));
+        assert!(help.contains("-verbose"));
+        assert!(help.contains("-file-extension=<extensions>"));
+        assert!(help.contains("-files=<paths>"));
+        assert!(help.contains("-git-branch"));
+        assert!(!help.contains("--verbose"));
+        assert!(!help.contains("--file-extension=<extensions>"));
+        assert!(!help.contains("--files=<paths>"));
+        assert!(!help.contains("--git-branch"));
+        assert!(help.contains("helps you find repeated code"));
+        assert!(!help.contains("Duplicate weight"));
+    }
+
+    #[test]
+    fn help_text_includes_version_from_cargo_lock() {
+        let version = codem8_version_from_cargo_lock().expect("codem8 version exists");
+        assert!(help_text().starts_with(&format!("CodeM8 {version} - ")));
+    }
+
+    #[test]
+    fn extracts_package_versions_from_cargo_lock_sections() {
+        let lockfile = r#"
+[[package]]
+name = "dependency"
+version = "1.2.3"
+
+[[package]]
+name = "codem8"
+version = "0.4.2"
+"#;
+        let package = cargo_lock_packages(lockfile)
+            .find(|package| package.name == "codem8")
+            .expect("package exists");
+        assert_eq!(package.version, "0.4.2");
     }
 
     #[test]
@@ -228,6 +313,7 @@ mod tests {
         assert!(!config.verbose);
         assert_eq!(config.file_extensions, supported_file_extensions());
         assert_eq!(config.files, None);
+        assert!(!config.git_branch);
     }
 
     #[test]
@@ -235,6 +321,13 @@ mod tests {
         let config = parse_args(["--report-duplicate", "-verbose"]).expect("config parses");
         assert!(config.report_duplicate);
         assert!(config.verbose);
+    }
+
+    #[test]
+    fn parses_git_branch_duplicate_report_config() {
+        let config = parse_args(["--report-duplicate", "-git-branch"]).expect("config parses");
+        assert!(config.git_branch);
+        assert_eq!(config.files, None);
     }
 
     #[test]
@@ -284,6 +377,7 @@ mod tests {
             "--verbose",
             "--file-extension=js",
             "--files=src/a.ts",
+            "--git-branch",
         ] {
             let error =
                 parse_args(["--report-duplicate", option]).expect_err("double-dash option fails");
@@ -313,6 +407,24 @@ mod tests {
         assert!(error
             .to_string()
             .contains("explicit files were provided more than once"));
+    }
+
+    #[test]
+    fn rejects_repeated_git_branch_arguments() {
+        let error = parse_args(["--report-duplicate", "-git-branch", "-git-branch"])
+            .expect_err("repeated git branch mode fails");
+        assert!(error
+            .to_string()
+            .contains("git branch mode was provided more than once"));
+    }
+
+    #[test]
+    fn rejects_git_branch_with_explicit_files() {
+        let error = parse_args(["--report-duplicate", "-git-branch", "-files=a.ts"])
+            .expect_err("exclusive file modes fail");
+        assert!(error
+            .to_string()
+            .contains("git branch mode cannot be combined with explicit files"));
     }
 
     #[test]

@@ -90,9 +90,16 @@ fn discover_explicit_files(
         if !seen_paths.insert(canonical_path.clone()) {
             continue;
         }
+        let display_path = if absolute_input {
+            canonical_path
+                .strip_prefix(current_dir)
+                .map_or_else(|_| normalize_display_path(file), normalize_display_path)
+        } else {
+            normalize_display_path(file)
+        };
         source_files.push(SourceFile {
             path: canonical_path,
-            display_path: normalize_display_path(file),
+            display_path,
             extension,
         });
     }

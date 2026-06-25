@@ -1,4 +1,5 @@
 use std::fmt::Write as _;
+use std::path::PathBuf;
 
 use crate::model::DuplicateBlock;
 use crate::paths::format_path;
@@ -7,6 +8,7 @@ use crate::paths::format_path;
 pub struct DuplicateReport {
     pub analyzed_files: usize,
     pub analyzed_extensions: Vec<String>,
+    pub scanned_files: Option<Vec<PathBuf>>,
     pub duplicate_blocks: Vec<DuplicateBlock>,
 }
 
@@ -15,7 +17,18 @@ pub fn render_duplicate_report(report: &DuplicateReport, verbose: bool) -> Strin
     let mut output = String::new();
     output.push_str("Duplicate Code Report\n");
     output.push_str("=====================\n\n");
-    let _ = writeln!(output, "Analyzed files: {}", report.analyzed_files);
+    let _ = writeln!(output, "Number of files scanned: {}", report.analyzed_files);
+    let scanned_files = if verbose {
+        report.scanned_files.as_ref()
+    } else {
+        None
+    };
+    if let Some(scanned_files) = scanned_files {
+        output.push_str("Files scanned:\n");
+        for file in scanned_files {
+            let _ = writeln!(output, "- {}", format_path(file));
+        }
+    }
     let _ = writeln!(
         output,
         "Analyzed extensions: {}",
@@ -68,6 +81,7 @@ mod tests {
         let report = DuplicateReport {
             analyzed_files: 0,
             analyzed_extensions: vec!["ts".to_string()],
+            scanned_files: None,
             duplicate_blocks: Vec::new(),
         };
         assert_eq!(
@@ -75,7 +89,7 @@ mod tests {
             "Duplicate Code Report\n\
              =====================\n\
              \n\
-             Analyzed files: 0\n\
+             Number of files scanned: 0\n\
              Analyzed extensions: ts\n\
              Duplicate blocks found: 0\n"
         );
@@ -86,6 +100,7 @@ mod tests {
         let report = DuplicateReport {
             analyzed_files: 2,
             analyzed_extensions: vec!["ts".to_string(), "js".to_string()],
+            scanned_files: None,
             duplicate_blocks: vec![DuplicateBlock {
                 normalized_lines: vec!["return value;".to_string()],
                 occurrences: vec![
@@ -122,6 +137,7 @@ mod tests {
         let report = DuplicateReport {
             analyzed_files: 2,
             analyzed_extensions: vec!["ts".to_string()],
+            scanned_files: None,
             duplicate_blocks: vec![DuplicateBlock {
                 normalized_lines: vec!["return value;".to_string()],
                 occurrences: vec![
@@ -144,5 +160,28 @@ mod tests {
         assert!(output.contains("Lines: 1"));
         assert!(output.contains("Occurrences: 2"));
         assert!(!output.contains("Characters:"));
+    }
+
+    #[test]
+    fn renders_scanned_file_list_only_in_verbose_mode() {
+        let report = DuplicateReport {
+            analyzed_files: 2,
+            analyzed_extensions: vec!["ts".to_string()],
+            scanned_files: Some(vec![
+                PathBuf::from("src/a.ts"),
+                PathBuf::from("src/nested/b.ts"),
+            ]),
+            duplicate_blocks: Vec::new(),
+        };
+        let quiet_output = render_duplicate_report(&report, false);
+        assert!(!quiet_output.contains("Files scanned:"));
+        let verbose_output = render_duplicate_report(&report, true);
+        assert!(verbose_output.contains(
+            "Number of files scanned: 2\n\
+             Files scanned:\n\
+             - src/a.ts\n\
+             - src/nested/b.ts\n\
+             Analyzed extensions: ts"
+        ));
     }
 }

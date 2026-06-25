@@ -27,11 +27,17 @@ pub const LANGUAGE_PATTERNS: &[LanguageLinePattern] = &[
         duplicate_mitigation_pattern: &['(', ')', ',', ':', ';', '<', '>', '?', '[', ']', '{', '}'],
         duplicate_mitigation_lines: &["///"],
         duplicate_mitigation_regexps: &[
+            // Excludes short path or enum variant fragments. Example: Self::Ready,
             r"^[A-Za-z0-9_]*::?\s*[A-Za-z0-9_]*[,]?$",
+            // Excludes bare identifiers with optional punctuation. Example: value,
             r"^[A-Za-z0-9_]+\s*[.,]?$",
+            // Excludes simple method or field access lines. Example: .clone()
             r"^\.?\s*[A-Za-z0-9_]+(?:\(\s*\)?)?$",
+            // Excludes incomplete let bindings split across lines. Example: let value =
             r"^let\s+(?:mut\s+)?[A-Za-z0-9_]+\s*=$",
+            // Excludes simple public struct field declarations. Example: pub name: String,
             r"^pub\s+[A-Za-z0-9_]*\s*:\s*[A-Za-z0-9_]*[,]?$",
+            // Excludes single-path use imports. Example: use crate::module;
             r"^use\s+[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*;$",
         ],
     },

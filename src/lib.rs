@@ -2,6 +2,7 @@ pub mod cli;
 pub mod discovery;
 pub mod duplicate;
 pub mod error;
+pub mod git;
 pub mod language;
 pub mod line;
 pub mod model;
@@ -30,16 +31,28 @@ where
             .write_all(cli::help_text().as_bytes())
             .map_err(|error| CodeM8Error::new(format!("could not write help output: {error}")))?,
         cli::CliCommand::ReportDuplicate(config) => {
+            let should_report_scanned_files = config.git_branch || config.files.is_some();
+            let git_branch_files = if config.git_branch {
+                Some(git::changed_files_against_origin(current_dir)?)
+            } else {
+                None
+            };
             let source_files = discovery::discover_source_files(
                 current_dir,
                 &config.file_extensions,
-                config.files.as_deref(),
+                git_branch_files.as_deref().or(config.files.as_deref()),
             )?;
             let processed_files = line::process_source_files(&source_files)?;
             let duplicate_blocks = duplicate::detect_duplicate_blocks(&processed_files);
             let report = report::DuplicateReport {
                 analyzed_files: source_files.len(),
                 analyzed_extensions: config.file_extensions,
+                scanned_files: should_report_scanned_files.then(|| {
+                    source_files
+                        .iter()
+                        .map(|source_file| source_file.display_path.clone())
+                        .collect()
+                }),
                 duplicate_blocks,
             };
             writer
@@ -122,7 +135,7 @@ mod tests {
                 "Duplicate Code Report\n",
                 "=====================\n",
                 "\n",
-                "Analyzed files: 2\n",
+                "Number of files scanned: 2\n",
                 "Analyzed extensions: ",
                 &expected_extensions,
                 "\n",
@@ -173,8 +186,29 @@ mod tests {
         project.write("src/b.ts", "const value = one;\n");
         let output =
             run_in(&project, &["--report-duplicate", "-files=src/a.ts"]).expect("report succeeds");
-        assert!(output.contains("Analyzed files: 1"));
+        assert!(output.contains("Number of files scanned: 1"));
         assert!(output.contains("Duplicate blocks found: 0"));
+    }
+
+    #[test]
+    fn verbose_explicit_files_report_lists_scanned_files() {
+        let project = TempProject::new("verbose-explicit-files");
+        project.write("src/a.ts", "const value = one;\n");
+        project.write("src/b.ts", "const value = one;\n");
+        let quiet_output =
+            run_in(&project, &["--report-duplicate", "-files=src/a.ts"]).expect("report succeeds");
+        assert!(!quiet_output.contains("Files scanned:"));
+        let verbose_output = run_in(
+            &project,
+            &["--report-duplicate", "-verbose", "-files=src/a.ts"],
+        )
+        .expect("report succeeds");
+        assert!(verbose_output.contains(
+            "Number of files scanned: 1\n\
+             Files scanned:\n\
+             - src/a.ts\n\
+             Analyzed extensions:"
+        ));
     }
 
     #[test]
@@ -183,11 +217,11 @@ mod tests {
         project.write("src/a.js", "const value = one;\n");
         project.write("src/b.js", "const value = one;\n");
         let default_output = run_in(&project, &["--report-duplicate"]).expect("report succeeds");
-        assert!(default_output.contains("Analyzed files: 2"));
+        assert!(default_output.contains("Number of files scanned: 2"));
         assert!(default_output.contains("Duplicate blocks found: 1"));
         let js_output = run_in(&project, &["--report-duplicate", "-file-extension=js"])
             .expect("report succeeds");
-        assert!(js_output.contains("Analyzed files: 2"));
+        assert!(js_output.contains("Number of files scanned: 2"));
         assert!(js_output.contains("Duplicate blocks found: 1"));
     }
 
