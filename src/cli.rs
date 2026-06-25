@@ -20,18 +20,16 @@ REQUIRED REPORT SWITCHES:
 
 OPTIONS:
   -file-extension=<extensions>
-  --file-extension=<extensions>
       Comma-separated source file extensions to analyze.
       Defaults to all extensions registered in LANGUAGE_PATTERNS.
       Examples: -file-extension=ts,tsx,js,jsx
 
   -files=<paths>
-  --files=<paths>
       Comma-separated explicit files to analyze instead of recursively
       discovering files from the current directory.
       Example: -files=src/a.ts,src/b.js
 
-  --verbose
+  -verbose
       Include duplicate block metrics in report output.
 
 DUPLICATE REPORT PURPOSE:
@@ -102,22 +100,16 @@ where
         let arg = arg.into();
         if arg == "--report-duplicate" {
             report_duplicate = true;
-        } else if arg == "--verbose" {
+        } else if arg == "-verbose" {
             verbose = true;
-        } else if let Some(value) = arg
-            .strip_prefix("-file-extension=")
-            .or_else(|| arg.strip_prefix("--file-extension="))
-        {
+        } else if let Some(value) = arg.strip_prefix("-file-extension=") {
             if file_extensions.is_some() {
                 return Err(CodeM8Error::new(
                     "file extensions were provided more than once",
                 ));
             }
             file_extensions = Some(parse_file_extensions(value)?);
-        } else if let Some(value) = arg
-            .strip_prefix("-files=")
-            .or_else(|| arg.strip_prefix("--files="))
-        {
+        } else if let Some(value) = arg.strip_prefix("-files=") {
             if files.is_some() {
                 return Err(CodeM8Error::new(
                     "explicit files were provided more than once",
@@ -196,7 +188,7 @@ pub fn parse_file_list(value: &str) -> Result<Vec<PathBuf>> {
 }
 
 fn is_help_argument(arg: &str) -> bool {
-    matches!(arg, "help" | "--help" | "-h")
+    matches!(arg, "help" | "-h")
 }
 
 #[cfg(test)]
@@ -210,12 +202,21 @@ mod tests {
     }
 
     #[test]
+    fn parses_short_help_option() {
+        let command = parse_command(["-h"]).expect("short help parses");
+        assert_eq!(command, CliCommand::Help);
+    }
+
+    #[test]
     fn exposes_detailed_help_text() {
         assert!(help_text().contains("USAGE:"));
         assert!(help_text().contains("--report-duplicate"));
-        assert!(help_text().contains("--verbose"));
+        assert!(help_text().contains("-verbose"));
         assert!(help_text().contains("-file-extension=<extensions>"));
         assert!(help_text().contains("-files=<paths>"));
+        assert!(!help_text().contains("--verbose"));
+        assert!(!help_text().contains("--file-extension=<extensions>"));
+        assert!(!help_text().contains("--files=<paths>"));
         assert!(help_text().contains("helps you find repeated code"));
         assert!(!help_text().contains("Duplicate weight"));
     }
@@ -231,7 +232,7 @@ mod tests {
 
     #[test]
     fn parses_verbose_duplicate_report_config() {
-        let config = parse_args(["--report-duplicate", "--verbose"]).expect("config parses");
+        let config = parse_args(["--report-duplicate", "-verbose"]).expect("config parses");
         assert!(config.report_duplicate);
         assert!(config.verbose);
     }
@@ -277,11 +278,27 @@ mod tests {
     }
 
     #[test]
+    fn rejects_double_dash_option_arguments() {
+        for option in [
+            "--help",
+            "--verbose",
+            "--file-extension=js",
+            "--files=src/a.ts",
+        ] {
+            let error =
+                parse_args(["--report-duplicate", option]).expect_err("double-dash option fails");
+            assert!(error
+                .to_string()
+                .contains(&format!("unknown argument: {option}")));
+        }
+    }
+
+    #[test]
     fn rejects_repeated_file_extension_arguments() {
         let error = parse_args([
             "--report-duplicate",
             "-file-extension=ts",
-            "--file-extension=js",
+            "-file-extension=js",
         ])
         .expect_err("repeated extensions fail");
         assert!(error
@@ -291,7 +308,7 @@ mod tests {
 
     #[test]
     fn rejects_repeated_explicit_file_arguments() {
-        let error = parse_args(["--report-duplicate", "-files=a.ts", "--files=b.ts"])
+        let error = parse_args(["--report-duplicate", "-files=a.ts", "-files=b.ts"])
             .expect_err("repeated explicit files fail");
         assert!(error
             .to_string()

@@ -155,7 +155,7 @@ mod tests {
             "const value = computeValue(input);\nreturn value;\n",
         );
         let output =
-            run_in(&project, &["--report-duplicate", "--verbose"]).expect("report succeeds");
+            run_in(&project, &["--report-duplicate", "-verbose"]).expect("report succeeds");
         assert!(output.contains("Weight:"));
         assert!(output.contains("Lines: 2"));
         assert!(output.contains("Occurrences: 2"));

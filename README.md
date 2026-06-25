@@ -61,7 +61,7 @@ codem8 --report-duplicate -file-extension=ts,js -files=src/a.ts,src/b.js
 Include duplicate block metrics:
 
 ```bash
-codem8 --report-duplicate --verbose
+codem8 --report-duplicate -verbose
 ```
 
 ## Duplicate Report
@@ -86,7 +86,7 @@ Reports are sorted deterministically by descending weight, then by line count,
 character count, first location, and normalized block text.
 
 By default, each duplicate block prints the duplicated code before its
-locations. Use `--verbose` to also show weight, line count, and occurrence
+locations. Use `-verbose` to also show weight, line count, and occurrence
 count. Character counts are used internally for scoring and sorting, but are
 not printed.
 
