@@ -1,0 +1,75 @@
+name: CodeRabbit Review Gate
+
+on:
+  pull_request_review:
+    types:
+      - submitted
+      - edited
+      - dismissed
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  coderabbit-review:
+    name: Validate CodeRabbit review
+    if: github.event.pull_request.draft == false && github.event.review.user.login == 'coderabbitai[bot]'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check CodeRabbit review state
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          node <<'NODE'
+          const token = process.env.GITHUB_TOKEN;
+          const [owner, repo] = process.env.GITHUB_REPOSITORY.split("/");
+          const prNumber = process.env.PR_NUMBER;
+          const headSha = process.env.PR_HEAD_SHA;
+
+          async function fetchReviews(page = 1, reviews = []) {
+            const url = `https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}/reviews?per_page=100&page=${page}`;
+            const response = await fetch(url, {
+              headers: {
+                Authorization: `Bearer ${token}`,
+                Accept: "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+              },
+            });
+
+            if (!response.ok) {
+              const body = await response.text();
+              throw new Error(`GitHub review lookup failed: ${response.status} ${body}`);
+            }
+
+            const pageReviews = await response.json();
+            if (pageReviews.length === 0) {
+              return reviews;
+            }
+            return fetchReviews(page + 1, reviews.concat(pageReviews));
+          }
+
+          const reviews = await fetchReviews();
+          const codeRabbitReviews = reviews
+            .filter((review) => review.user?.login === "coderabbitai[bot]")
+            .filter((review) => review.commit_id === headSha)
+            .sort((left, right) => new Date(left.submitted_at) - new Date(right.submitted_at));
+
+          const latestReview = codeRabbitReviews.at(-1);
+          if (!latestReview) {
+            console.error(`CodeRabbit has not submitted a review for ${headSha}.`);
+            process.exit(1);
+          }
+
+          if (latestReview.state === "CHANGES_REQUESTED") {
+            console.error("CodeRabbit requested changes on this pull request.");
+            process.exit(1);
+          }
+
+          console.log(`CodeRabbit review state for ${headSha}: ${latestReview.state}`);
+          NODE
+
