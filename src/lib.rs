@@ -25,23 +25,29 @@ where
     S: Into<String>,
     W: Write,
 {
-    let config = cli::parse_args(args)?;
-    if config.report_duplicate {
-        let source_files = discovery::discover_source_files(
-            current_dir,
-            &config.file_extensions,
-            config.files.as_deref(),
-        )?;
-        let processed_files = line::process_source_files(&source_files)?;
-        let duplicate_blocks = duplicate::detect_duplicate_blocks(&processed_files);
-        let report = report::DuplicateReport {
-            analyzed_files: source_files.len(),
-            analyzed_extensions: config.file_extensions,
-            duplicate_blocks,
-        };
-        writer
-            .write_all(report::render_duplicate_report(&report).as_bytes())
-            .map_err(|error| CodeM8Error::new(format!("could not write report output: {error}")))?;
+    match cli::parse_command(args)? {
+        cli::CliCommand::Help => writer
+            .write_all(cli::help_text().as_bytes())
+            .map_err(|error| CodeM8Error::new(format!("could not write help output: {error}")))?,
+        cli::CliCommand::ReportDuplicate(config) => {
+            let source_files = discovery::discover_source_files(
+                current_dir,
+                &config.file_extensions,
+                config.files.as_deref(),
+            )?;
+            let processed_files = line::process_source_files(&source_files)?;
+            let duplicate_blocks = duplicate::detect_duplicate_blocks(&processed_files);
+            let report = report::DuplicateReport {
+                analyzed_files: source_files.len(),
+                analyzed_extensions: config.file_extensions,
+                duplicate_blocks,
+            };
+            writer
+                .write_all(report::render_duplicate_report(&report).as_bytes())
+                .map_err(|error| {
+                    CodeM8Error::new(format!("could not write report output: {error}"))
+                })?;
+        }
     }
     Ok(())
 }
@@ -169,5 +175,13 @@ mod tests {
         assert!(error
             .to_string()
             .contains("explicit file does not exist: missing.ts"));
+    }
+
+    #[test]
+    fn help_command_prints_documentation() {
+        let project = TempProject::new("help");
+        let output = run_in(&project, &["help"]).expect("help succeeds");
+        assert!(output.contains("USAGE:"));
+        assert!(output.contains("--report-duplicate"));
     }
 }

@@ -3,12 +3,80 @@ use std::path::PathBuf;
 use crate::error::{CodeM8Error, Result};
 
 const DEFAULT_FILE_EXTENSIONS: &[&str] = &["ts"];
+const HELP_TEXT: &str = "\
+CodeM8 - deterministic source code analysis reports.
+
+USAGE:
+  codem8 help
+  codem8 --report-duplicate [OPTIONS]
+
+COMMANDS:
+  help
+      Display this detailed documentation.
+
+REQUIRED REPORT SWITCHES:
+  --report-duplicate
+      Analyze source files and print a duplicate code report.
+
+OPTIONS:
+  -file-extension=<extensions>
+  --file-extension=<extensions>
+      Comma-separated source file extensions to analyze.
+      Defaults to: ts
+      Examples: -file-extension=ts,tsx,js,jsx
+
+  -files=<paths>
+  --files=<paths>
+      Comma-separated explicit files to analyze instead of recursively
+      discovering files from the current directory.
+      Example: -files=src/a.ts,src/b.js
+
+DUPLICATE REPORT PURPOSE:
+  The duplicate report helps you find repeated code that may be worth
+  refactoring, reviewing, or consolidating. It lists each duplicated block with
+  the files and line ranges where it appears, making it easier to compare the
+  repeated code and decide whether it should stay duplicated.
+
+EXAMPLES:
+  codem8 --report-duplicate
+  codem8 --report-duplicate -file-extension=ts,tsx,js,jsx
+  codem8 --report-duplicate -file-extension=ts,js -files=src/a.ts,src/b.js
+";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CliCommand {
+    Help,
+    ReportDuplicate(CliConfig),
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CliConfig {
     pub report_duplicate: bool,
     pub file_extensions: Vec<String>,
     pub files: Option<Vec<PathBuf>>,
+}
+
+#[must_use]
+pub const fn help_text() -> &'static str {
+    HELP_TEXT
+}
+
+/// Parses command-line arguments into a CLI command.
+///
+/// # Errors
+///
+/// Returns an error when the arguments are invalid, repeated, or missing the
+/// required report switch.
+pub fn parse_command<I, S>(args: I) -> Result<CliCommand>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<String>,
+{
+    let args = args.into_iter().map(Into::into).collect::<Vec<_>>();
+    if args.len() == 1 && is_help_argument(&args[0]) {
+        return Ok(CliCommand::Help);
+    }
+    parse_args(args).map(CliCommand::ReportDuplicate)
 }
 
 /// Parses command-line arguments into a validated CLI configuration.
@@ -54,7 +122,7 @@ where
         }
     }
     if !report_duplicate {
-        return Err(CodeM8Error::new(
+        return Err(CodeM8Error::with_help(
             "no report switch provided; pass --report-duplicate",
         ));
     }
@@ -124,9 +192,29 @@ pub fn parse_file_list(value: &str) -> Result<Vec<PathBuf>> {
     Ok(files)
 }
 
+fn is_help_argument(arg: &str) -> bool {
+    matches!(arg, "help" | "--help" | "-h")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_help_command() {
+        let command = parse_command(["help"]).expect("help parses");
+        assert_eq!(command, CliCommand::Help);
+    }
+
+    #[test]
+    fn exposes_detailed_help_text() {
+        assert!(help_text().contains("USAGE:"));
+        assert!(help_text().contains("--report-duplicate"));
+        assert!(help_text().contains("-file-extension=<extensions>"));
+        assert!(help_text().contains("-files=<paths>"));
+        assert!(help_text().contains("helps you find repeated code"));
+        assert!(!help_text().contains("Duplicate weight"));
+    }
 
     #[test]
     fn parses_default_duplicate_report_config() {
@@ -166,12 +254,14 @@ mod tests {
     fn rejects_missing_report_switch() {
         let error = parse_args(["-file-extension=rs"]).expect_err("missing report fails");
         assert!(error.to_string().contains("no report switch provided"));
+        assert!(error.should_show_help());
     }
 
     #[test]
     fn rejects_unknown_arguments() {
         let error = parse_args(["--report-duplicate", "--verbose"]).expect_err("unknown arg fails");
         assert!(error.to_string().contains("unknown argument: --verbose"));
+        assert!(!error.should_show_help());
     }
 
     #[test]

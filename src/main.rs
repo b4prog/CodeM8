@@ -18,6 +18,10 @@ fn main() -> ExitCode {
         }
         Err(error) => {
             eprintln!("error: {error}");
+            if error.should_show_help() {
+                eprintln!();
+                eprint!("{}", codem8::cli::help_text());
+            }
             ExitCode::FAILURE
         }
     }

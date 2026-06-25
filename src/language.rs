@@ -21,7 +21,22 @@ pub const LANGUAGE_PATTERNS: &[LanguageLinePattern] = &[
     LanguageLinePattern {
         language_name: "Rust",
         extensions: &["rs"],
-        block_only_lines: &["{", "}", "(", ")", "[", "]", ");", "];"],
+        block_only_lines: &[
+            "{",
+            "}",
+            "(",
+            ")",
+            "))",
+            "[",
+            "]",
+            ");",
+            "];",
+            "));",
+            "})?;",
+            "})",
+            "})?;",
+            ".into_iter()",
+        ],
     },
     LanguageLinePattern {
         language_name: "C / C++ / Objective-C",
