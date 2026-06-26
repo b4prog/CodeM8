@@ -1,6 +1,5 @@
 pub mod cli;
 pub mod discovery;
-pub mod duplicate;
 pub mod error;
 pub mod git;
 pub mod language;
@@ -49,7 +48,7 @@ where
                 time_result(config.verbose, || line::process_source_files(&source_files))?;
             let (duplicate_blocks, duplicate_detection_duration) =
                 time_value(config.verbose, || {
-                    duplicate::detect_duplicate_blocks(&processed_files)
+                    report::detect_duplicate_blocks(&processed_files)
                 });
             let report = report::DuplicateReport {
                 analyzed_files: source_files.len(),
