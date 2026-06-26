@@ -5,10 +5,12 @@ use super::version::codem8_version_from_cargo_lock;
 const HELP_TEXT_BODY: &str = "\
 USAGE:
   codem8 help
+  codem8 -h
   codem8 --report-duplicate [OPTIONS]
 
 COMMANDS:
   help
+  -h
       Display this detailed documentation.
 
 REQUIRED REPORT SWITCHES:
@@ -69,6 +71,8 @@ mod tests {
     fn exposes_detailed_help_text() {
         let help = help_text();
         assert!(help.contains("USAGE:"));
+        assert!(help.contains("codem8 -h"));
+        assert!(help.contains("  -h"));
         assert!(help.contains("--report-duplicate"));
         assert!(help.contains("-verbose"));
         assert!(help.contains("-file-extension=<extensions>"));
