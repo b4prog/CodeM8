@@ -135,7 +135,9 @@ pub(super) const LANGUAGE_PATTERNS: &[LanguageLinePattern] = &[
     },
     LanguageLinePattern {
         language: &RUST,
-        duplicate_mitigation_pattern: &['(', ')', ',', ':', ';', '<', '>', '?', '[', ']', '{', '}'],
+        duplicate_mitigation_pattern: &[
+            '&', '(', ')', ',', ':', ';', '<', '>', '?', '[', ']', '{', '}',
+        ],
         duplicate_mitigation_lines: &["///", "#[test]"],
         duplicate_mitigation_regexps: &[
             // Excludes short path or enum variant fragments. Example: Self::Ready,
