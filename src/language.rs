@@ -17,9 +17,18 @@ pub const LANGUAGE_PATTERNS: &[LanguageLinePattern] = &[
     LanguageLinePattern {
         language_name: "TypeScript / JavaScript",
         extensions: &["ts", "tsx", "js", "jsx", "mjs", "cjs"],
-        duplicate_mitigation_pattern: &['(', ')', ',', ':', ';', '<', '>', '?', '[', ']', '{', '}'],
-        duplicate_mitigation_lines: &[],
-        duplicate_mitigation_regexps: &[],
+        duplicate_mitigation_pattern: &[
+            '&', '(', ')', ',', ':', ';', '<', '>', '?', '[', ']', '{', '|', '}',
+        ],
+        duplicate_mitigation_lines: &["// @ts-nocheck"],
+        duplicate_mitigation_regexps: &[
+            // Excludes single-line block comments used by generated files and tooling. Example: /* eslint-disable */
+            r"^/\*.*\*/$",
+            // Excludes generated interface field declarations. Example: errors: InvalidInputError[]
+            r"^[A-Za-z_$][A-Za-z0-9_$]*\??:\s*(?:Scalars\['[A-Za-z]+'\]|[A-Z][A-Za-z0-9_$]*(?:\[\])?|[a-z]+(?:\[\])?|\([^)]*\))(?:\[\])?(?:\s*\|\s*(?:null|number|boolean|string))*[,]?$",
+            // Excludes generated GraphQL typename marker fields. Example: __typename: 'User'
+            r"^__typename:\s*'[A-Za-z_$][A-Za-z0-9_$]*'[,]?$",
+        ],
     },
     LanguageLinePattern {
         language_name: "Rust",
@@ -142,8 +151,8 @@ pub const LANGUAGE_PATTERNS: &[LanguageLinePattern] = &[
         duplicate_mitigation_regexps: &[],
     },
     LanguageLinePattern {
-        language_name: "YAML / JSON / TOML",
-        extensions: &["yaml", "yml", "json", "toml"],
+        language_name: "YAML",
+        extensions: &["yaml", "yml"],
         duplicate_mitigation_pattern: &['(', ')', ',', ':', ';', '<', '>', '?', '[', ']', '{', '}'],
         duplicate_mitigation_lines: &["jobs:", "on:"],
         duplicate_mitigation_regexps: &[],
@@ -329,6 +338,34 @@ mod tests {
         let line = ".update()?.await";
         let hash = hash_normalized_line(line);
         assert_eq!(classify_line("rs", line, hash), LineStatus::Comparison);
+    }
+
+    #[test]
+    fn assigns_block_only_status_for_typescript_codegen_lines() {
+        let lines = [
+            "// @ts-nocheck",
+            "/* eslint-disable */",
+            "errors: DeleteViewsError[]",
+            "__typename: 'DeleteViewsResponse'",
+        ];
+        for line in lines {
+            let hash = hash_normalized_line(line);
+            assert_eq!(classify_line("ts", line, hash), LineStatus::BlockOnly);
+        }
+    }
+
+    #[test]
+    fn assigns_block_only_status_for_yaml_lines() {
+        let line = "jobs:";
+        let hash = hash_normalized_line(line);
+        assert_eq!(classify_line("yaml", line, hash), LineStatus::BlockOnly);
+    }
+
+    #[test]
+    fn assigns_comparison_status_for_json_lines() {
+        let line = "}";
+        let hash = hash_normalized_line(line);
+        assert_eq!(classify_line("json", line, hash), LineStatus::Comparison);
     }
 
     #[test]
