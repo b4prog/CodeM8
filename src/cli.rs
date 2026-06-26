@@ -147,6 +147,11 @@ where
             "no report switch provided; pass --report-duplicate",
         ));
     }
+    if parsed.report_duplicate > 1 {
+        return Err(CodeM8Error::new(
+            "report switch was provided more than once",
+        ));
+    }
     if parsed.git_branch > 1 {
         return Err(CodeM8Error::new(
             "git branch mode was provided more than once",
@@ -440,6 +445,15 @@ version = "0.4.2"
         assert!(error
             .to_string()
             .contains("file extensions were provided more than once"));
+    }
+
+    #[test]
+    fn rejects_repeated_report_switches() {
+        let error = parse_args(["--report-duplicate", "--report-duplicate"])
+            .expect_err("repeated report switch fails");
+        assert!(error
+            .to_string()
+            .contains("report switch was provided more than once"));
     }
 
     #[test]
