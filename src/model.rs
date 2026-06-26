@@ -44,7 +44,7 @@ pub struct DuplicateBlock {
 
 impl DuplicateBlock {
     #[must_use]
-    pub const fn line_count(&self) -> usize {
+    pub fn line_count(&self) -> usize {
         self.normalized_lines.len()
     }
 

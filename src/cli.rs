@@ -1,6 +1,8 @@
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
+use clap::{ArgAction, Parser};
+
 use crate::error::{CodeM8Error, Result};
 use crate::language::supported_file_extensions;
 
@@ -71,6 +73,31 @@ pub struct CliConfig {
     pub git_branch: bool,
 }
 
+#[derive(Debug, Parser)]
+#[command(name = "codem8", disable_help_flag = true, disable_version_flag = true)]
+struct ClapCli {
+    #[arg(long = "report-duplicate", action = ArgAction::Count)]
+    report_duplicate: u8,
+    #[arg(long = "codem8-verbose", action = ArgAction::Count)]
+    verbose: u8,
+    #[arg(long = "codem8-git-branch", action = ArgAction::Count)]
+    git_branch: u8,
+    #[arg(
+        long = "codem8-file-extension",
+        value_name = "extensions",
+        value_parser = parse_file_extensions,
+        action = ArgAction::Append
+    )]
+    file_extensions: Vec<Vec<String>>,
+    #[arg(
+        long = "codem8-files",
+        value_name = "paths",
+        value_parser = parse_file_list,
+        action = ArgAction::Append
+    )]
+    files: Vec<Vec<PathBuf>>,
+}
+
 #[must_use]
 pub fn help_text() -> String {
     let version = codem8_version_from_cargo_lock().unwrap_or("unknown");
@@ -113,56 +140,48 @@ where
     I: IntoIterator<Item = S>,
     S: Into<String>,
 {
-    let mut report_duplicate = false;
-    let mut verbose = false;
-    let mut file_extensions = None;
-    let mut files = None;
-    let mut git_branch = false;
-    for arg in args {
-        let arg = arg.into();
-        if arg == "--report-duplicate" {
-            report_duplicate = true;
-        } else if arg == "-verbose" {
-            verbose = true;
-        } else if arg == "-git-branch" {
-            if git_branch {
-                return Err(CodeM8Error::new(
-                    "git branch mode was provided more than once",
-                ));
-            }
-            git_branch = true;
-        } else if let Some(value) = arg.strip_prefix("-file-extension=") {
-            if file_extensions.is_some() {
-                return Err(CodeM8Error::new(
-                    "file extensions were provided more than once",
-                ));
-            }
-            file_extensions = Some(parse_file_extensions(value)?);
-        } else if let Some(value) = arg.strip_prefix("-files=") {
-            if files.is_some() {
-                return Err(CodeM8Error::new(
-                    "explicit files were provided more than once",
-                ));
-            }
-            files = Some(parse_file_list(value)?);
-        } else {
-            return Err(CodeM8Error::new(format!("unknown argument: {arg}")));
-        }
-    }
-    if !report_duplicate {
+    let parsed = ClapCli::try_parse_from(normalized_clap_args(args)?)
+        .map_err(|error| CodeM8Error::new(error.to_string().trim().to_owned()))?;
+    if parsed.report_duplicate == 0 {
         return Err(CodeM8Error::with_help(
             "no report switch provided; pass --report-duplicate",
         ));
     }
+    if parsed.report_duplicate > 1 {
+        return Err(CodeM8Error::new(
+            "report switch was provided more than once",
+        ));
+    }
+    if parsed.git_branch > 1 {
+        return Err(CodeM8Error::new(
+            "git branch mode was provided more than once",
+        ));
+    }
+    if parsed.file_extensions.len() > 1 {
+        return Err(CodeM8Error::new(
+            "file extensions were provided more than once",
+        ));
+    }
+    if parsed.files.len() > 1 {
+        return Err(CodeM8Error::new(
+            "explicit files were provided more than once",
+        ));
+    }
+    let git_branch = parsed.git_branch != 0;
+    let files = parsed.files.into_iter().next();
     if git_branch && files.is_some() {
         return Err(CodeM8Error::new(
             "git branch mode cannot be combined with explicit files",
         ));
     }
     Ok(CliConfig {
-        report_duplicate,
-        verbose,
-        file_extensions: file_extensions.unwrap_or_else(supported_file_extensions),
+        report_duplicate: parsed.report_duplicate != 0,
+        verbose: parsed.verbose != 0,
+        file_extensions: parsed
+            .file_extensions
+            .into_iter()
+            .next()
+            .unwrap_or_else(supported_file_extensions),
         files,
         git_branch,
     })
@@ -224,6 +243,34 @@ pub fn parse_file_list(value: &str) -> Result<Vec<PathBuf>> {
 
 fn is_help_argument(arg: &str) -> bool {
     matches!(arg, "help" | "-h")
+}
+
+fn normalized_clap_args<I, S>(args: I) -> Result<Vec<String>>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<String>,
+{
+    let mut normalized = vec!["codem8".to_owned()];
+    for arg in args {
+        normalized.push(normalized_clap_arg(arg.into())?);
+    }
+    Ok(normalized)
+}
+
+fn normalized_clap_arg(arg: String) -> Result<String> {
+    if arg == "-verbose" {
+        Ok("--codem8-verbose".to_owned())
+    } else if arg == "-git-branch" {
+        Ok("--codem8-git-branch".to_owned())
+    } else if let Some(value) = arg.strip_prefix("-file-extension=") {
+        Ok(format!("--codem8-file-extension={value}"))
+    } else if let Some(value) = arg.strip_prefix("-files=") {
+        Ok(format!("--codem8-files={value}"))
+    } else if arg.starts_with("--") && arg != "--report-duplicate" {
+        Err(CodeM8Error::new(format!("unknown argument: {arg}")))
+    } else {
+        Ok(arg)
+    }
 }
 
 fn codem8_version_from_cargo_lock() -> Option<&'static str> {
@@ -398,6 +445,15 @@ version = "0.4.2"
         assert!(error
             .to_string()
             .contains("file extensions were provided more than once"));
+    }
+
+    #[test]
+    fn rejects_repeated_report_switches() {
+        let error = parse_args(["--report-duplicate", "--report-duplicate"])
+            .expect_err("repeated report switch fails");
+        assert!(error
+            .to_string()
+            .contains("report switch was provided more than once"));
     }
 
     #[test]
