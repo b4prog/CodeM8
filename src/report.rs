@@ -41,7 +41,7 @@ pub fn render_duplicate_report(report: &DuplicateReport, verbose: bool) -> Strin
     let _ = writeln!(
         output,
         "Analyzed extensions: {}",
-        report.analyzed_extensions.join(", ")
+        sorted_extensions(&report.analyzed_extensions).join(", ")
     );
     let _ = writeln!(
         output,
@@ -102,6 +102,12 @@ fn format_duration(duration: Duration) -> String {
     let milliseconds = microseconds / 1_000;
     let fractional_microseconds = microseconds % 1_000;
     format!("{milliseconds}.{fractional_microseconds:03} ms")
+}
+
+fn sorted_extensions(extensions: &[String]) -> Vec<String> {
+    let mut extensions = extensions.to_vec();
+    extensions.sort();
+    extensions
 }
 
 #[cfg(test)]
@@ -169,6 +175,19 @@ mod tests {
             output.find("Code:").expect("code section exists")
                 < output.find("Locations:").expect("locations section exists")
         );
+    }
+
+    #[test]
+    fn renders_analyzed_extensions_alphabetically() {
+        let report = DuplicateReport {
+            analyzed_files: 0,
+            analyzed_extensions: vec!["ts".to_string(), "js".to_string(), "rs".to_string()],
+            scanned_files: None,
+            timings: None,
+            duplicate_blocks: Vec::new(),
+        };
+        let output = render_duplicate_report(&report, false);
+        assert!(output.contains("Analyzed extensions: js, rs, ts\n"));
     }
 
     #[test]
