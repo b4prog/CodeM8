@@ -180,13 +180,6 @@ mod tests {
                 "Duplicate blocks found: 1\n",
                 "\n",
                 "#1\n",
-                "Code:\n",
-                "  const value = computeValue(input);\n",
-                "  if (value === undefined) {\n",
-                "  return defaultValue;\n",
-                "  }\n",
-                "\n",
-                "Locations:\n",
                 "- src/a.ts:1-4\n",
                 "- src/b.ts:1-4\n",
             ]
