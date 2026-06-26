@@ -1,5 +1,6 @@
 use std::fmt::Write as _;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use crate::model::DuplicateBlock;
 use crate::paths::format_path;
@@ -9,7 +10,15 @@ pub struct DuplicateReport {
     pub analyzed_files: usize,
     pub analyzed_extensions: Vec<String>,
     pub scanned_files: Option<Vec<PathBuf>>,
+    pub timings: Option<DuplicateReportTimings>,
     pub duplicate_blocks: Vec<DuplicateBlock>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DuplicateReportTimings {
+    pub discovery: Duration,
+    pub file_processing: Duration,
+    pub duplicate_detection: Duration,
 }
 
 #[must_use]
@@ -39,6 +48,26 @@ pub fn render_duplicate_report(report: &DuplicateReport, verbose: bool) -> Strin
         "Duplicate blocks found: {}",
         report.duplicate_blocks.len()
     );
+    if verbose {
+        if let Some(timings) = report.timings {
+            output.push_str("Timings:\n");
+            let _ = writeln!(
+                output,
+                "- Discovery: {}",
+                format_duration(timings.discovery)
+            );
+            let _ = writeln!(
+                output,
+                "- File processing: {}",
+                format_duration(timings.file_processing)
+            );
+            let _ = writeln!(
+                output,
+                "- Duplicate detection: {}",
+                format_duration(timings.duplicate_detection)
+            );
+        }
+    }
     for (index, block) in report.duplicate_blocks.iter().enumerate() {
         output.push('\n');
         let _ = writeln!(output, "#{}", index + 1);
@@ -68,9 +97,17 @@ pub fn render_duplicate_report(report: &DuplicateReport, verbose: bool) -> Strin
     output
 }
 
+fn format_duration(duration: Duration) -> String {
+    let microseconds = duration.as_micros();
+    let milliseconds = microseconds / 1_000;
+    let fractional_microseconds = microseconds % 1_000;
+    format!("{milliseconds}.{fractional_microseconds:03} ms")
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+    use std::time::Duration;
 
     use crate::model::{DuplicateBlock, DuplicateOccurrence};
 
@@ -82,6 +119,7 @@ mod tests {
             analyzed_files: 0,
             analyzed_extensions: vec!["ts".to_string()],
             scanned_files: None,
+            timings: None,
             duplicate_blocks: Vec::new(),
         };
         assert_eq!(
@@ -101,6 +139,7 @@ mod tests {
             analyzed_files: 2,
             analyzed_extensions: vec!["ts".to_string(), "js".to_string()],
             scanned_files: None,
+            timings: None,
             duplicate_blocks: vec![DuplicateBlock {
                 normalized_lines: vec!["return value;".to_string()],
                 occurrences: vec![
@@ -138,6 +177,7 @@ mod tests {
             analyzed_files: 2,
             analyzed_extensions: vec!["ts".to_string()],
             scanned_files: None,
+            timings: None,
             duplicate_blocks: vec![DuplicateBlock {
                 normalized_lines: vec!["return value;".to_string()],
                 occurrences: vec![
@@ -171,6 +211,7 @@ mod tests {
                 PathBuf::from("src/a.ts"),
                 PathBuf::from("src/nested/b.ts"),
             ]),
+            timings: None,
             duplicate_blocks: Vec::new(),
         };
         let quiet_output = render_duplicate_report(&report, false);
@@ -182,6 +223,30 @@ mod tests {
              - src/a.ts\n\
              - src/nested/b.ts\n\
              Analyzed extensions: ts"
+        ));
+    }
+
+    #[test]
+    fn renders_timings_only_in_verbose_mode() {
+        let report = DuplicateReport {
+            analyzed_files: 1,
+            analyzed_extensions: vec!["ts".to_string()],
+            scanned_files: None,
+            timings: Some(DuplicateReportTimings {
+                discovery: Duration::from_micros(1_234),
+                file_processing: Duration::from_micros(12_345),
+                duplicate_detection: Duration::from_micros(123_456),
+            }),
+            duplicate_blocks: Vec::new(),
+        };
+        let quiet_output = render_duplicate_report(&report, false);
+        assert!(!quiet_output.contains("Timings:"));
+        let verbose_output = render_duplicate_report(&report, true);
+        assert!(verbose_output.contains(
+            "Timings:\n\
+             - Discovery: 1.234 ms\n\
+             - File processing: 12.345 ms\n\
+             - Duplicate detection: 123.456 ms\n"
         ));
     }
 }
