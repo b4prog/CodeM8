@@ -34,7 +34,7 @@ pub const LANGUAGE_PATTERNS: &[LanguageLinePattern] = &[
         language_name: "Rust",
         extensions: &["rs"],
         duplicate_mitigation_pattern: &['(', ')', ',', ':', ';', '<', '>', '?', '[', ']', '{', '}'],
-        duplicate_mitigation_lines: &["///"],
+        duplicate_mitigation_lines: &["///", "#[test]"],
         duplicate_mitigation_regexps: &[
             // Excludes short path or enum variant fragments. Example: Self::Ready,
             r"^[A-Za-z0-9_]*::?\s*[A-Za-z0-9_]*[,]?$",
