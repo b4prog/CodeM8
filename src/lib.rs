@@ -1,7 +1,6 @@
 pub mod cli;
 pub mod discovery;
 pub mod error;
-pub mod git;
 pub mod language;
 pub mod line;
 pub mod model;
@@ -34,7 +33,7 @@ where
             let should_report_scanned_files = config.git_branch || config.files.is_some();
             let (source_files, discovery_duration) = time_result(config.verbose, || {
                 let git_branch_files = if config.git_branch {
-                    Some(git::changed_files_against_origin(current_dir)?)
+                    Some(discovery::changed_files_against_origin(current_dir)?)
                 } else {
                     None
                 };
