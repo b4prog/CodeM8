@@ -76,14 +76,14 @@ pub fn render_duplicate_report(report: &DuplicateReport, verbose: bool) -> Strin
             let _ = writeln!(output, "Lines: {}", block.line_count());
             let _ = writeln!(output, "Occurrences: {}", block.occurrences.len());
             output.push('\n');
+            output.push_str("Code:\n");
+            for line in &block.normalized_lines {
+                output.push_str("  ");
+                output.push_str(line);
+                output.push('\n');
+            }
+            output.push_str("\nLocations:\n");
         }
-        output.push_str("Code:\n");
-        for line in &block.normalized_lines {
-            output.push_str("  ");
-            output.push_str(line);
-            output.push('\n');
-        }
-        output.push_str("\nLocations:\n");
         for occurrence in &block.occurrences {
             let _ = writeln!(
                 output,
@@ -169,12 +169,11 @@ mod tests {
         assert!(!output.contains("Lines: 1"));
         assert!(!output.contains("Occurrences: 2"));
         assert!(!output.contains("Characters:"));
+        assert!(!output.contains("Code:"));
+        assert!(!output.contains("Locations:"));
         assert!(output.contains("- src/a.ts:1-1"));
-        assert!(output.contains("  return value;"));
-        assert!(
-            output.find("Code:").expect("code section exists")
-                < output.find("Locations:").expect("locations section exists")
-        );
+        assert!(!output.contains("  return value;"));
+        assert!(output.contains("#1\n- src/a.ts:1-1\n- src/b.js:5-5\n"));
     }
 
     #[test]
@@ -219,6 +218,9 @@ mod tests {
         assert!(output.contains("Lines: 1"));
         assert!(output.contains("Occurrences: 2"));
         assert!(!output.contains("Characters:"));
+        assert!(output.contains("Code:"));
+        assert!(output.contains("Locations:"));
+        assert!(output.contains("  return value;"));
     }
 
     #[test]

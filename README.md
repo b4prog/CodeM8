@@ -99,10 +99,11 @@ Duplicate block weight is calculated as:
 Reports are sorted deterministically by descending weight, then by line count,
 character count, first location, and normalized block text.
 
-By default, each duplicate block prints the duplicated code before its
-locations. Use `-verbose` to also show weight, line count, occurrence count, and
-timings for discovery, file processing, and duplicate detection. Character
-counts are used internally for scoring and sorting, but are not printed.
+By default, each duplicate block prints only the duplicate locations. Use
+`-verbose` to also show the duplicated code, weight, line count, occurrence
+count, and timings for discovery, file processing, and duplicate detection.
+Character counts are used internally for scoring and sorting, but are not
+printed.
 
 ## Development
 
