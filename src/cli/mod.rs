@@ -1,0 +1,64 @@
+use std::path::PathBuf;
+
+mod args;
+mod help;
+mod version;
+
+pub use args::{parse_args, parse_file_extensions, parse_file_list};
+pub use help::help_text;
+
+use crate::error::Result;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CliCommand {
+    Help,
+    ReportDuplicate(CliConfig),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CliConfig {
+    pub report_duplicate: bool,
+    pub verbose: bool,
+    pub file_extensions: Vec<String>,
+    pub files: Option<Vec<PathBuf>>,
+    pub git_branch: bool,
+}
+
+/// Parses command-line arguments into a CLI command.
+///
+/// # Errors
+///
+/// Returns an error when the arguments are invalid, repeated, or missing the
+/// required report switch.
+pub fn parse_command<I, S>(args: I) -> Result<CliCommand>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<String>,
+{
+    let args = args.into_iter().map(Into::into).collect::<Vec<_>>();
+    if args.len() == 1 && is_help_argument(&args[0]) {
+        return Ok(CliCommand::Help);
+    }
+    parse_args(args).map(CliCommand::ReportDuplicate)
+}
+
+fn is_help_argument(arg: &str) -> bool {
+    matches!(arg, "help" | "-h")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_help_command() {
+        let command = parse_command(["help"]).expect("help parses");
+        assert_eq!(command, CliCommand::Help);
+    }
+
+    #[test]
+    fn parses_short_help_option() {
+        let command = parse_command(["-h"]).expect("short help parses");
+        assert_eq!(command, CliCommand::Help);
+    }
+}
