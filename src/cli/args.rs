@@ -1,77 +1,10 @@
-use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use clap::{ArgAction, Parser};
 
+use super::CliConfig;
 use crate::error::{CodeM8Error, Result};
 use crate::language::supported_file_extensions;
-
-const CARGO_LOCK: &str = include_str!("../Cargo.lock");
-const HELP_TEXT_BODY: &str = "\
-USAGE:
-  codem8 help
-  codem8 --report-duplicate [OPTIONS]
-
-COMMANDS:
-  help
-      Display this detailed documentation.
-
-REQUIRED REPORT SWITCHES:
-  --report-duplicate
-      Analyze source files and print a duplicate code report.
-
-OPTIONS:
-  -file-extension=<extensions>
-      Comma-separated source file extensions to analyze.
-      Defaults to all extensions registered in LANGUAGE_PATTERNS.
-      Examples: -file-extension=ts,tsx,js,jsx
-
-  -files=<paths>
-      Comma-separated explicit files to analyze instead of recursively
-      discovering files from the current directory.
-      Example: -files=src/a.ts,src/b.js
-
-  -git-branch
-      Analyze files changed on the current local Git branch compared to the
-      origin base branch, including committed, staged, unstaged, and untracked
-      files. Cannot be combined with -files.
-
-  -verbose
-      Include duplicate block metrics in report output.
-
-DUPLICATE REPORT PURPOSE:
-  The duplicate report helps you find repeated code that may be worth
-  refactoring, reviewing, or consolidating. It lists each duplicated block with
-  the files and line ranges where it appears, making it easier to compare the
-  repeated code and decide whether it should stay duplicated.
-
-EXAMPLES:
-  codem8 --report-duplicate
-  codem8 --report-duplicate -file-extension=ts,tsx,js,jsx
-  codem8 --report-duplicate -file-extension=ts,js -files=src/a.ts,src/b.js
-  codem8 --report-duplicate -git-branch
-";
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct CargoLockPackage<'a> {
-    name: &'a str,
-    version: &'a str,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CliCommand {
-    Help,
-    ReportDuplicate(CliConfig),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CliConfig {
-    pub report_duplicate: bool,
-    pub verbose: bool,
-    pub file_extensions: Vec<String>,
-    pub files: Option<Vec<PathBuf>>,
-    pub git_branch: bool,
-}
 
 #[derive(Debug, Parser)]
 #[command(name = "codem8", disable_help_flag = true, disable_version_flag = true)]
@@ -96,37 +29,6 @@ struct ClapCli {
         action = ArgAction::Append
     )]
     files: Vec<Vec<PathBuf>>,
-}
-
-#[must_use]
-pub fn help_text() -> String {
-    let version = codem8_version_from_cargo_lock().unwrap_or("unknown");
-    let mut output = String::new();
-    let _ = writeln!(
-        output,
-        "CodeM8 {version} - deterministic source code analysis reports."
-    );
-    output.push('\n');
-    output.push_str(HELP_TEXT_BODY);
-    output
-}
-
-/// Parses command-line arguments into a CLI command.
-///
-/// # Errors
-///
-/// Returns an error when the arguments are invalid, repeated, or missing the
-/// required report switch.
-pub fn parse_command<I, S>(args: I) -> Result<CliCommand>
-where
-    I: IntoIterator<Item = S>,
-    S: Into<String>,
-{
-    let args = args.into_iter().map(Into::into).collect::<Vec<_>>();
-    if args.len() == 1 && is_help_argument(&args[0]) {
-        return Ok(CliCommand::Help);
-    }
-    parse_args(args).map(CliCommand::ReportDuplicate)
 }
 
 /// Parses command-line arguments into a validated CLI configuration.
@@ -241,10 +143,6 @@ pub fn parse_file_list(value: &str) -> Result<Vec<PathBuf>> {
     Ok(files)
 }
 
-fn is_help_argument(arg: &str) -> bool {
-    matches!(arg, "help" | "-h")
-}
-
 fn normalized_clap_args<I, S>(args: I) -> Result<Vec<String>>
 where
     I: IntoIterator<Item = S>,
@@ -273,85 +171,9 @@ fn normalized_clap_arg(arg: String) -> Result<String> {
     }
 }
 
-fn codem8_version_from_cargo_lock() -> Option<&'static str> {
-    cargo_lock_packages(CARGO_LOCK)
-        .find(|package| package.name == "codem8")
-        .map(|package| package.version)
-}
-
-fn cargo_lock_packages(lockfile: &str) -> impl Iterator<Item = CargoLockPackage<'_>> {
-    lockfile.split("[[package]]").filter_map(cargo_lock_package)
-}
-
-fn cargo_lock_package(section: &str) -> Option<CargoLockPackage<'_>> {
-    let name = cargo_lock_value(section, "name")?;
-    let version = cargo_lock_value(section, "version")?;
-    Some(CargoLockPackage { name, version })
-}
-
-fn cargo_lock_value<'a>(section: &'a str, key: &str) -> Option<&'a str> {
-    let prefix = format!("{key} = \"");
-    section
-        .lines()
-        .map(str::trim)
-        .find_map(|line| line.strip_prefix(&prefix)?.strip_suffix('"'))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn parses_help_command() {
-        let command = parse_command(["help"]).expect("help parses");
-        assert_eq!(command, CliCommand::Help);
-    }
-
-    #[test]
-    fn parses_short_help_option() {
-        let command = parse_command(["-h"]).expect("short help parses");
-        assert_eq!(command, CliCommand::Help);
-    }
-
-    #[test]
-    fn exposes_detailed_help_text() {
-        let help = help_text();
-        assert!(help.contains("USAGE:"));
-        assert!(help.contains("--report-duplicate"));
-        assert!(help.contains("-verbose"));
-        assert!(help.contains("-file-extension=<extensions>"));
-        assert!(help.contains("-files=<paths>"));
-        assert!(help.contains("-git-branch"));
-        assert!(!help.contains("--verbose"));
-        assert!(!help.contains("--file-extension=<extensions>"));
-        assert!(!help.contains("--files=<paths>"));
-        assert!(!help.contains("--git-branch"));
-        assert!(help.contains("helps you find repeated code"));
-        assert!(!help.contains("Duplicate weight"));
-    }
-
-    #[test]
-    fn help_text_includes_version_from_cargo_lock() {
-        let version = codem8_version_from_cargo_lock().expect("codem8 version exists");
-        assert!(help_text().starts_with(&format!("CodeM8 {version} - ")));
-    }
-
-    #[test]
-    fn extracts_package_versions_from_cargo_lock_sections() {
-        let lockfile = r#"
-[[package]]
-name = "dependency"
-version = "1.2.3"
-
-[[package]]
-name = "codem8"
-version = "0.4.2"
-"#;
-        let package = cargo_lock_packages(lockfile)
-            .find(|package| package.name == "codem8")
-            .expect("package exists");
-        assert_eq!(package.version, "0.4.2");
-    }
 
     #[test]
     fn parses_default_duplicate_report_config() {
