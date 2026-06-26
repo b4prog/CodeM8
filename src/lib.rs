@@ -33,12 +33,12 @@ where
             .map_err(|error| CodeM8Error::new(format!("could not write help output: {error}")))?,
         cli::CliCommand::ReportDuplicate(config) => {
             let should_report_scanned_files = config.git_branch || config.files.is_some();
-            let git_branch_files = if config.git_branch {
-                Some(git::changed_files_against_origin(current_dir)?)
-            } else {
-                None
-            };
             let (source_files, discovery_duration) = time_result(config.verbose, || {
+                let git_branch_files = if config.git_branch {
+                    Some(git::changed_files_against_origin(current_dir)?)
+                } else {
+                    None
+                };
                 discovery::discover_source_files(
                     current_dir,
                     &config.file_extensions,
