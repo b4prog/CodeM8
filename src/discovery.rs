@@ -1,8 +1,9 @@
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc;
 
-use ignore::{DirEntry, WalkBuilder};
+use ignore::{DirEntry, WalkBuilder, WalkState};
 
 use crate::error::{CodeM8Error, Result};
 use crate::model::SourceFile;
@@ -45,7 +46,11 @@ pub fn discover_source_files(
 }
 
 fn discover_recursive_files(root: &Path, extensions: &[String]) -> Result<Vec<SourceFile>> {
-    let walker = WalkBuilder::new(root)
+    let root = root.to_path_buf();
+    let extensions = extensions.to_vec();
+    let (source_tx, source_rx) = mpsc::channel();
+    let (error_tx, error_rx) = mpsc::channel();
+    let walker = WalkBuilder::new(&root)
         .hidden(false)
         .ignore(true)
         .git_ignore(true)
@@ -54,35 +59,62 @@ fn discover_recursive_files(root: &Path, extensions: &[String]) -> Result<Vec<So
         .require_git(false)
         .parents(true)
         .filter_entry(should_walk_entry)
-        .build();
-    let mut source_files = Vec::new();
-    for entry in walker {
-        let entry = entry.map_err(|error| {
-            CodeM8Error::new(format!(
-                "could not walk directory {}: {error}",
-                format_path(root)
-            ))
-        })?;
-        let Some(file_type) = entry.file_type() else {
-            continue;
-        };
-        if !file_type.is_file() {
-            continue;
-        }
-        let path = entry.path();
-        let Some(extension) = selected_extension(path, extensions) else {
-            continue;
-        };
-        let display_path = path
-            .strip_prefix(root)
-            .map_or_else(|_| normalize_display_path(path), normalize_display_path);
-        source_files.push(SourceFile {
-            path: path.to_path_buf(),
-            display_path,
-            extension,
-        });
+        .build_parallel();
+    walker.run(|| {
+        let root = root.clone();
+        let extensions = extensions.clone();
+        let source_tx = source_tx.clone();
+        let error_tx = error_tx.clone();
+        Box::new(move |entry| match entry {
+            Ok(entry) => {
+                let Some(source_file) = source_file_from_entry(&root, &extensions, &entry) else {
+                    return WalkState::Continue;
+                };
+                if source_tx.send(source_file).is_err() {
+                    return WalkState::Quit;
+                }
+                WalkState::Continue
+            }
+            Err(error) => {
+                let _ = error_tx.send(walk_error(&root, &error));
+                WalkState::Quit
+            }
+        })
+    });
+    drop(source_tx);
+    drop(error_tx);
+    if let Some(error) = error_rx.into_iter().next() {
+        return Err(error);
     }
-    Ok(source_files)
+    Ok(source_rx.into_iter().collect())
+}
+
+fn source_file_from_entry(
+    root: &Path,
+    extensions: &[String],
+    entry: &DirEntry,
+) -> Option<SourceFile> {
+    let file_type = entry.file_type()?;
+    if !file_type.is_file() {
+        return None;
+    }
+    let path = entry.path();
+    let extension = selected_extension(path, extensions)?;
+    let display_path = path
+        .strip_prefix(root)
+        .map_or_else(|_| normalize_display_path(path), normalize_display_path);
+    Some(SourceFile {
+        path: path.to_path_buf(),
+        display_path,
+        extension,
+    })
+}
+
+fn walk_error(root: &Path, error: &ignore::Error) -> CodeM8Error {
+    CodeM8Error::new(format!(
+        "could not walk directory {}: {error}",
+        format_path(root)
+    ))
 }
 
 fn should_walk_entry(entry: &DirEntry) -> bool {
