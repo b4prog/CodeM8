@@ -15,8 +15,78 @@ pub struct LanguageLinePattern {
 
 pub const LANGUAGE_PATTERNS: &[LanguageLinePattern] = &[
     LanguageLinePattern {
-        language_name: "TypeScript / JavaScript",
-        extensions: &["ts", "tsx", "js", "jsx", "mjs", "cjs"],
+        language_name: "Bash",
+        extensions: &["bash"],
+        duplicate_mitigation_pattern: &['&', '(', ')', ';', '[', ']', '{', '|', '}'],
+        duplicate_mitigation_lines: &["do", "done", "else", "fi", "then"],
+        duplicate_mitigation_regexps: &[],
+    },
+    LanguageLinePattern {
+        language_name: "C",
+        extensions: &["c", "h"],
+        duplicate_mitigation_pattern: &['(', ')', ',', ':', ';', '<', '>', '?', '[', ']', '{', '}'],
+        duplicate_mitigation_lines: &["#else", "#endif"],
+        duplicate_mitigation_regexps: &[],
+    },
+    LanguageLinePattern {
+        language_name: "C#",
+        extensions: &["cs"],
+        duplicate_mitigation_pattern: &['(', ')', ',', ':', ';', '<', '>', '?', '[', ']', '{', '}'],
+        duplicate_mitigation_lines: &["#else", "#endif", "#endregion"],
+        duplicate_mitigation_regexps: &[],
+    },
+    LanguageLinePattern {
+        language_name: "C++",
+        extensions: &["cpp", "hpp", "cc", "hh", "cxx", "hxx"],
+        duplicate_mitigation_pattern: &['(', ')', ',', ':', ';', '<', '>', '?', '[', ']', '{', '}'],
+        duplicate_mitigation_lines: &["#else", "#endif"],
+        duplicate_mitigation_regexps: &[],
+    },
+    LanguageLinePattern {
+        language_name: "CSS",
+        extensions: &["css"],
+        duplicate_mitigation_pattern: &['(', ')', ',', ':', ';', '[', ']', '{', '}'],
+        duplicate_mitigation_lines: &[],
+        duplicate_mitigation_regexps: &[],
+    },
+    LanguageLinePattern {
+        language_name: "Fish",
+        extensions: &["fish"],
+        duplicate_mitigation_pattern: &['&', '(', ')', ';', '[', ']', '{', '|', '}'],
+        duplicate_mitigation_lines: &["else", "end"],
+        duplicate_mitigation_regexps: &[],
+    },
+    LanguageLinePattern {
+        language_name: "Go",
+        extensions: &["go"],
+        duplicate_mitigation_pattern: &['(', ')', ',', ':', ';', '[', ']', '{', '}'],
+        duplicate_mitigation_lines: &[],
+        duplicate_mitigation_regexps: &[],
+    },
+    LanguageLinePattern {
+        language_name: "HTML",
+        extensions: &["html", "htm"],
+        duplicate_mitigation_pattern: &['/', '<', '>'],
+        duplicate_mitigation_lines: &[
+            "</article>",
+            "</body>",
+            "</div>",
+            "</html>",
+            "</section>",
+            "</span>",
+        ],
+        duplicate_mitigation_regexps: &[],
+    },
+    LanguageLinePattern {
+        language_name: "Java",
+        extensions: &["java"],
+        duplicate_mitigation_pattern: &['(', ')', ',', ':', ';', '<', '>', '?', '[', ']', '{', '}'],
+        duplicate_mitigation_lines: &[],
+        duplicate_mitigation_regexps: &[],
+    },
+    LanguageLinePattern {
+        language_name: "JavaScript",
+        extensions: &["js", "jsx", "mjs", "cjs"],
         duplicate_mitigation_pattern: &[
             '&', '(', ')', ',', ':', ';', '<', '>', '?', '[', ']', '{', '|', '}',
         ],
@@ -31,50 +101,39 @@ pub const LANGUAGE_PATTERNS: &[LanguageLinePattern] = &[
         ],
     },
     LanguageLinePattern {
-        language_name: "Rust",
-        extensions: &["rs"],
-        duplicate_mitigation_pattern: &['(', ')', ',', ':', ';', '<', '>', '?', '[', ']', '{', '}'],
-        duplicate_mitigation_lines: &["///"],
-        duplicate_mitigation_regexps: &[
-            // Excludes short path or enum variant fragments. Example: Self::Ready,
-            r"^[A-Za-z0-9_]*::?\s*[A-Za-z0-9_]*[,]?$",
-            // Excludes bare identifiers with optional punctuation. Example: value,
-            r"^[A-Za-z0-9_]+\s*[.,]?$",
-            // Excludes simple method or field access lines. Example: .clone()
-            r"^\.?\s*[A-Za-z0-9_]+(?:\(\s*\)?)?$",
-            // Excludes incomplete let bindings split across lines. Example: let value =
-            r"^let\s+(?:mut\s+)?[A-Za-z0-9_]+\s*=$",
-            // Excludes simple public struct field declarations. Example: pub name: String,
-            r"^pub\s+[A-Za-z0-9_]*\s*:\s*[A-Za-z0-9_]*[,]?$",
-            // Excludes single-path use imports. Example: use crate::module;
-            r"^use\s+[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*;$",
-        ],
-    },
-    LanguageLinePattern {
-        language_name: "C / C++ / Objective-C",
-        extensions: &["c", "h", "cpp", "hpp", "cc", "hh", "cxx", "hxx", "m", "mm"],
-        duplicate_mitigation_pattern: &['(', ')', ',', ':', ';', '<', '>', '?', '[', ']', '{', '}'],
-        duplicate_mitigation_lines: &["#else", "#endif"],
-        duplicate_mitigation_regexps: &[],
-    },
-    LanguageLinePattern {
-        language_name: "C#",
-        extensions: &["cs"],
-        duplicate_mitigation_pattern: &['(', ')', ',', ':', ';', '<', '>', '?', '[', ']', '{', '}'],
-        duplicate_mitigation_lines: &["#else", "#endif", "#endregion"],
-        duplicate_mitigation_regexps: &[],
-    },
-    LanguageLinePattern {
-        language_name: "Java / Kotlin / Scala",
-        extensions: &["java", "kt", "kts", "scala", "sc"],
+        language_name: "Kotlin",
+        extensions: &["kt", "kts"],
         duplicate_mitigation_pattern: &['(', ')', ',', ':', ';', '<', '>', '?', '[', ']', '{', '}'],
         duplicate_mitigation_lines: &[],
         duplicate_mitigation_regexps: &[],
     },
     LanguageLinePattern {
-        language_name: "Go",
-        extensions: &["go"],
+        language_name: "Less",
+        extensions: &["less"],
         duplicate_mitigation_pattern: &['(', ')', ',', ':', ';', '[', ']', '{', '}'],
+        duplicate_mitigation_lines: &[],
+        duplicate_mitigation_regexps: &[],
+    },
+    LanguageLinePattern {
+        language_name: "Objective-C",
+        extensions: &["m", "mm"],
+        duplicate_mitigation_pattern: &['(', ')', ',', ':', ';', '<', '>', '?', '[', ']', '{', '}'],
+        duplicate_mitigation_lines: &["#else", "#endif"],
+        duplicate_mitigation_regexps: &[],
+    },
+    LanguageLinePattern {
+        language_name: "PHP",
+        extensions: &["php", "phtml"],
+        duplicate_mitigation_pattern: &[
+            '(', ')', ',', '/', ':', ';', '<', '>', '?', '[', ']', '{', '}',
+        ],
+        duplicate_mitigation_lines: &[],
+        duplicate_mitigation_regexps: &[],
+    },
+    LanguageLinePattern {
+        language_name: "PowerShell",
+        extensions: &["ps1", "psm1", "psd1"],
+        duplicate_mitigation_pattern: &['(', ')', ',', ':', ';', '?', '[', ']', '{', '|', '}'],
         duplicate_mitigation_lines: &[],
         duplicate_mitigation_regexps: &[],
     },
@@ -93,12 +152,58 @@ pub const LANGUAGE_PATTERNS: &[LanguageLinePattern] = &[
         duplicate_mitigation_regexps: &[],
     },
     LanguageLinePattern {
-        language_name: "PHP",
-        extensions: &["php", "phtml"],
-        duplicate_mitigation_pattern: &[
-            '(', ')', ',', '/', ':', ';', '<', '>', '?', '[', ']', '{', '}',
+        language_name: "Rust",
+        extensions: &["rs"],
+        duplicate_mitigation_pattern: &['(', ')', ',', ':', ';', '<', '>', '?', '[', ']', '{', '}'],
+        duplicate_mitigation_lines: &["///", "#[test]"],
+        duplicate_mitigation_regexps: &[
+            // Excludes short path or enum variant fragments. Example: Self::Ready,
+            r"^[A-Za-z0-9_]*::?\s*[A-Za-z0-9_]*[,]?$",
+            // Excludes bare identifiers with optional punctuation. Example: value,
+            r"^[A-Za-z0-9_]+\s*[.,]?$",
+            // Excludes simple method or field access lines. Example: .clone()
+            r"^\.?\s*[A-Za-z0-9_]+(?:\(\s*\)?)?$",
+            // Excludes incomplete let bindings split across lines. Example: let value =
+            r"^let\s+(?:mut\s+)?[A-Za-z0-9_]+\s*=$",
+            // Excludes simple public struct field declarations. Example: pub name: String,
+            r"^pub\s+[A-Za-z0-9_]*\s*:\s*[A-Za-z0-9_]*[,]?$",
+            // Excludes single-path use imports. Example: use crate::module;
+            r"^use\s+[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*;$",
         ],
+    },
+    LanguageLinePattern {
+        language_name: "Sass",
+        extensions: &["sass"],
+        duplicate_mitigation_pattern: &['(', ')', ',', ':', ';', '[', ']', '{', '}'],
         duplicate_mitigation_lines: &[],
+        duplicate_mitigation_regexps: &[],
+    },
+    LanguageLinePattern {
+        language_name: "Scala",
+        extensions: &["scala", "sc"],
+        duplicate_mitigation_pattern: &['(', ')', ',', ':', ';', '<', '>', '?', '[', ']', '{', '}'],
+        duplicate_mitigation_lines: &[],
+        duplicate_mitigation_regexps: &[],
+    },
+    LanguageLinePattern {
+        language_name: "SCSS",
+        extensions: &["scss"],
+        duplicate_mitigation_pattern: &['(', ')', ',', ':', ';', '[', ']', '{', '}'],
+        duplicate_mitigation_lines: &[],
+        duplicate_mitigation_regexps: &[],
+    },
+    LanguageLinePattern {
+        language_name: "Shell",
+        extensions: &["sh"],
+        duplicate_mitigation_pattern: &['&', '(', ')', ';', '[', ']', '{', '|', '}'],
+        duplicate_mitigation_lines: &["do", "done", "else", "fi", "then"],
+        duplicate_mitigation_regexps: &[],
+    },
+    LanguageLinePattern {
+        language_name: "SQL",
+        extensions: &["sql"],
+        duplicate_mitigation_pattern: &['(', ')', ',', ':', ';'],
+        duplicate_mitigation_lines: &["BEGIN", "END"],
         duplicate_mitigation_regexps: &[],
     },
     LanguageLinePattern {
@@ -109,22 +214,24 @@ pub const LANGUAGE_PATTERNS: &[LanguageLinePattern] = &[
         duplicate_mitigation_regexps: &[],
     },
     LanguageLinePattern {
-        language_name: "Shell",
-        extensions: &["sh", "bash", "zsh", "fish"],
-        duplicate_mitigation_pattern: &['&', '(', ')', ';', '[', ']', '{', '|', '}'],
-        duplicate_mitigation_lines: &["do", "done", "else", "fi", "then"],
-        duplicate_mitigation_regexps: &[],
+        language_name: "TypeScript",
+        extensions: &["ts", "tsx"],
+        duplicate_mitigation_pattern: &[
+            '&', '(', ')', ',', ':', ';', '<', '>', '?', '[', ']', '{', '|', '}',
+        ],
+        duplicate_mitigation_lines: &["// @ts-nocheck"],
+        duplicate_mitigation_regexps: &[
+            // Excludes single-line block comments used by generated files and tooling. Example: /* eslint-disable */
+            r"^/\*.*\*/$",
+            // Excludes generated interface field declarations. Example: errors: InvalidInputError[]
+            r"^[A-Za-z_$][A-Za-z0-9_$]*\??:\s*(?:Scalars\['[A-Za-z]+'\]|[A-Z][A-Za-z0-9_$]*(?:\[\])?|[a-z]+(?:\[\])?|\([^)]*\))(?:\[\])?(?:\s*\|\s*(?:null|number|boolean|string))*[,]?$",
+            // Excludes generated GraphQL typename marker fields. Example: __typename: 'User'
+            r"^__typename:\s*'[A-Za-z_$][A-Za-z0-9_$]*'[,]?$",
+        ],
     },
     LanguageLinePattern {
-        language_name: "PowerShell",
-        extensions: &["ps1", "psm1", "psd1"],
-        duplicate_mitigation_pattern: &['(', ')', ',', ':', ';', '?', '[', ']', '{', '|', '}'],
-        duplicate_mitigation_lines: &[],
-        duplicate_mitigation_regexps: &[],
-    },
-    LanguageLinePattern {
-        language_name: "HTML / XML",
-        extensions: &["html", "htm", "xml", "xhtml", "svg"],
+        language_name: "XML",
+        extensions: &["xml", "xhtml", "svg"],
         duplicate_mitigation_pattern: &['/', '<', '>'],
         duplicate_mitigation_lines: &[
             "</article>",
@@ -137,24 +244,17 @@ pub const LANGUAGE_PATTERNS: &[LanguageLinePattern] = &[
         duplicate_mitigation_regexps: &[],
     },
     LanguageLinePattern {
-        language_name: "CSS / SCSS / Sass / Less",
-        extensions: &["css", "scss", "sass", "less"],
-        duplicate_mitigation_pattern: &['(', ')', ',', ':', ';', '[', ']', '{', '}'],
-        duplicate_mitigation_lines: &[],
-        duplicate_mitigation_regexps: &[],
-    },
-    LanguageLinePattern {
-        language_name: "SQL",
-        extensions: &["sql"],
-        duplicate_mitigation_pattern: &['(', ')', ',', ':', ';'],
-        duplicate_mitigation_lines: &["BEGIN", "END"],
-        duplicate_mitigation_regexps: &[],
-    },
-    LanguageLinePattern {
         language_name: "YAML",
         extensions: &["yaml", "yml"],
         duplicate_mitigation_pattern: &['(', ')', ',', ':', ';', '<', '>', '?', '[', ']', '{', '}'],
         duplicate_mitigation_lines: &["jobs:", "on:"],
+        duplicate_mitigation_regexps: &[],
+    },
+    LanguageLinePattern {
+        language_name: "Zsh",
+        extensions: &["zsh"],
+        duplicate_mitigation_pattern: &['&', '(', ')', ';', '[', ']', '{', '|', '}'],
+        duplicate_mitigation_lines: &["do", "done", "else", "fi", "then"],
         duplicate_mitigation_regexps: &[],
     },
 ];
@@ -386,6 +486,32 @@ mod tests {
         for language in LANGUAGE_PATTERNS {
             for extension in language.extensions {
                 assert!(extensions.iter().any(|selected| selected == extension));
+            }
+        }
+    }
+
+    #[test]
+    fn language_patterns_are_sorted_by_name() {
+        for pair in LANGUAGE_PATTERNS.windows(2) {
+            assert!(
+                pair[0].language_name.to_ascii_lowercase()
+                    <= pair[1].language_name.to_ascii_lowercase()
+            );
+        }
+    }
+
+    #[test]
+    fn language_patterns_use_unique_extensions() {
+        let mut languages_by_extension = HashMap::new();
+        for language in LANGUAGE_PATTERNS {
+            for extension in language.extensions {
+                let previous = languages_by_extension.insert(extension, language.language_name);
+                assert!(
+                    previous.is_none(),
+                    "{extension} belongs to both {} and {}",
+                    previous.unwrap_or_default(),
+                    language.language_name
+                );
             }
         }
     }
