@@ -11,6 +11,7 @@ pub mod report;
 
 use std::io::Write;
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use crate::error::{CodeM8Error, Result};
 
@@ -32,18 +33,24 @@ where
             .map_err(|error| CodeM8Error::new(format!("could not write help output: {error}")))?,
         cli::CliCommand::ReportDuplicate(config) => {
             let should_report_scanned_files = config.git_branch || config.files.is_some();
-            let git_branch_files = if config.git_branch {
-                Some(git::changed_files_against_origin(current_dir)?)
-            } else {
-                None
-            };
-            let source_files = discovery::discover_source_files(
-                current_dir,
-                &config.file_extensions,
-                git_branch_files.as_deref().or(config.files.as_deref()),
-            )?;
-            let processed_files = line::process_source_files(&source_files)?;
-            let duplicate_blocks = duplicate::detect_duplicate_blocks(&processed_files);
+            let (source_files, discovery_duration) = time_result(config.verbose, || {
+                let git_branch_files = if config.git_branch {
+                    Some(git::changed_files_against_origin(current_dir)?)
+                } else {
+                    None
+                };
+                discovery::discover_source_files(
+                    current_dir,
+                    &config.file_extensions,
+                    git_branch_files.as_deref().or(config.files.as_deref()),
+                )
+            })?;
+            let (processed_files, file_processing_duration) =
+                time_result(config.verbose, || line::process_source_files(&source_files))?;
+            let (duplicate_blocks, duplicate_detection_duration) =
+                time_value(config.verbose, || {
+                    duplicate::detect_duplicate_blocks(&processed_files)
+                });
             let report = report::DuplicateReport {
                 analyzed_files: source_files.len(),
                 analyzed_extensions: config.file_extensions,
@@ -53,6 +60,20 @@ where
                         .map(|source_file| source_file.display_path.clone())
                         .collect()
                 }),
+                timings: match (
+                    discovery_duration,
+                    file_processing_duration,
+                    duplicate_detection_duration,
+                ) {
+                    (Some(discovery), Some(file_processing), Some(duplicate_detection)) => {
+                        Some(report::DuplicateReportTimings {
+                            discovery,
+                            file_processing,
+                            duplicate_detection,
+                        })
+                    }
+                    _ => None,
+                },
                 duplicate_blocks,
             };
             writer
@@ -63,6 +84,21 @@ where
         }
     }
     Ok(())
+}
+
+fn time_result<T>(
+    enabled: bool,
+    operation: impl FnOnce() -> Result<T>,
+) -> Result<(T, Option<Duration>)> {
+    let started_at = enabled.then(Instant::now);
+    let value = operation()?;
+    Ok((value, started_at.map(|instant| instant.elapsed())))
+}
+
+fn time_value<T>(enabled: bool, operation: impl FnOnce() -> T) -> (T, Option<Duration>) {
+    let started_at = enabled.then(Instant::now);
+    let value = operation();
+    (value, started_at.map(|instant| instant.elapsed()))
 }
 
 #[cfg(test)]
@@ -128,7 +164,9 @@ mod tests {
             "const value = computeValue(input);\nif (value === undefined) {\nreturn defaultValue;\n}\n",
         );
         let output = run_in(&project, &["--report-duplicate"]).expect("report succeeds");
-        let expected_extensions = language::supported_file_extensions().join(", ");
+        let mut expected_extensions = language::supported_file_extensions();
+        expected_extensions.sort();
+        let expected_extensions = expected_extensions.join(", ");
         assert_eq!(
             output,
             [
@@ -172,6 +210,10 @@ mod tests {
         assert!(output.contains("Weight:"));
         assert!(output.contains("Lines: 2"));
         assert!(output.contains("Occurrences: 2"));
+        assert!(output.contains("Timings:"));
+        assert!(output.contains("- Discovery:"));
+        assert!(output.contains("- File processing:"));
+        assert!(output.contains("- Duplicate detection:"));
         assert!(!output.contains("Characters:"));
         assert!(
             output.find("Code:").expect("code section exists")
