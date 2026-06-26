@@ -10,5 +10,6 @@ categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 ignore = "0.4"
+rayon = "1"
 regex = "1"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }

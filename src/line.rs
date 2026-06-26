@@ -1,6 +1,8 @@
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 
+use rayon::prelude::*;
+
 use crate::error::{CodeM8Error, Result};
 use crate::language::{classify_line, hash_normalized_line};
 use crate::model::{LineEntry, ProcessedFile, SourceFile};
@@ -11,7 +13,7 @@ use crate::model::{LineEntry, ProcessedFile, SourceFile};
 ///
 /// Returns an error when any input file cannot be opened or read as UTF-8 text.
 pub fn process_source_files(source_files: &[SourceFile]) -> Result<Vec<ProcessedFile>> {
-    source_files.iter().map(process_source_file).collect()
+    source_files.par_iter().map(process_source_file).collect()
 }
 
 /// Processes one source file into its normalized, classified lines.
@@ -63,6 +65,7 @@ pub fn normalize_line(line: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::path::PathBuf;
 
     use crate::model::LineStatus;
 
@@ -95,6 +98,32 @@ mod tests {
         assert_eq!(processed.lines[1].normalized_text, "}");
         assert_eq!(processed.lines[1].status, LineStatus::BlockOnly);
         fs::remove_file(path).expect("cleanup");
+    }
+
+    #[test]
+    fn processes_files_in_input_order() {
+        let id = std::process::id();
+        let first_path = std::env::temp_dir().join(format!("codem8-line-order-first-{id}.ts"));
+        let second_path = std::env::temp_dir().join(format!("codem8-line-order-second-{id}.ts"));
+        fs::write(&first_path, "const first = 1;\n").expect("write first source file");
+        fs::write(&second_path, "const second = 2;\n").expect("write second source file");
+        let sources = vec![
+            SourceFile {
+                path: first_path.clone(),
+                display_path: "first.ts".into(),
+                extension: "ts".to_string(),
+            },
+            SourceFile {
+                path: second_path.clone(),
+                display_path: "second.ts".into(),
+                extension: "ts".to_string(),
+            },
+        ];
+        let processed = process_source_files(&sources).expect("process source files");
+        assert_eq!(processed[0].source.display_path, PathBuf::from("first.ts"));
+        assert_eq!(processed[1].source.display_path, PathBuf::from("second.ts"));
+        fs::remove_file(first_path).expect("cleanup first");
+        fs::remove_file(second_path).expect("cleanup second");
     }
 
     #[test]
