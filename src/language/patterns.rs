@@ -138,7 +138,7 @@ pub(super) const LANGUAGE_PATTERNS: &[LanguageLinePattern] = &[
         duplicate_mitigation_pattern: &[
             '&', '(', ')', ',', ':', ';', '<', '>', '?', '[', ']', '{', '}',
         ],
-        duplicate_mitigation_lines: &["///", "#[test]"],
+        duplicate_mitigation_lines: &["///", "#[test]", "assert!(", "assert_eq!("],
         duplicate_mitigation_regexps: &[
             // Excludes short path or enum variant fragments. Example: Self::Ready,
             r"^[A-Za-z0-9_]*::?\s*[A-Za-z0-9_]*[,]?$",

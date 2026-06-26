@@ -139,6 +139,14 @@ mod tests {
     }
 
     #[test]
+    fn assigns_block_only_status_for_rust_assert_macro_openers() {
+        for line in ["assert!(", "assert_eq!("] {
+            let hash = hash_normalized_line(line);
+            assert_eq!(classify_line("rs", line, hash), LineStatus::BlockOnly);
+        }
+    }
+
+    #[test]
     fn assigns_comparison_status_for_meaningful_lines() {
         let line = "const value = computeValue(input);";
         let hash = hash_normalized_line(line);
