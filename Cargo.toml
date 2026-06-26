@@ -9,6 +9,7 @@ keywords = ["cli", "duplicate-detection", "source-code", "analysis"]
 categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
+clap = { version = "4.6.1", features = ["derive"] }
 ignore = "0.4"
 rayon = "1"
 regex = "1"
