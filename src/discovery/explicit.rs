@@ -12,6 +12,8 @@ pub(super) fn discover_explicit_files(
     extensions: &[String],
     files: &[PathBuf],
 ) -> Result<Vec<SourceFile>> {
+    let canonical_current_dir = fs::canonicalize(current_dir)
+        .map_err(|error| CodeM8Error::io(current_dir, "canonicalize current directory", &error))?;
     let mut source_files = Vec::new();
     let mut seen_paths = HashSet::new();
     for file in files {
@@ -55,7 +57,7 @@ pub(super) fn discover_explicit_files(
         }
         let display_path = if absolute_input {
             canonical_path
-                .strip_prefix(current_dir)
+                .strip_prefix(&canonical_current_dir)
                 .map_or_else(|_| normalize_display_path(file), normalize_display_path)
         } else {
             normalize_display_path(file)
@@ -124,6 +126,18 @@ mod tests {
         .expect("discover");
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].path, absolute);
+        assert_eq!(format_path(&files[0].display_path), "a.ts");
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn absolute_explicit_files_are_displayed_relative_to_normalized_current_dir() {
+        let root = temp_dir("normalized-current-dir");
+        fs::write(root.join("a.ts"), "").expect("write ts");
+        let absolute = fs::canonicalize(root.join("a.ts")).expect("canonicalize ts");
+        let files = discover_explicit_files(&root.join("."), &["ts".to_string()], &[absolute])
+            .expect("discover");
+        assert_eq!(files.len(), 1);
         assert_eq!(format_path(&files[0].display_path), "a.ts");
         fs::remove_dir_all(root).expect("cleanup");
     }
