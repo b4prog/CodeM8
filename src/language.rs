@@ -53,7 +53,7 @@ pub const LANGUAGE_PATTERNS: &[LanguageLinePattern] = &[
         language_name: "Fish",
         extensions: &["fish"],
         duplicate_mitigation_pattern: &['&', '(', ')', ';', '[', ']', '{', '|', '}'],
-        duplicate_mitigation_lines: &["do", "done", "else", "fi", "then"],
+        duplicate_mitigation_lines: &["else", "end"],
         duplicate_mitigation_regexps: &[],
     },
     LanguageLinePattern {
