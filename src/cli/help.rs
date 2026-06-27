@@ -29,9 +29,8 @@ OPTIONS:
       Example: -files=src/a.ts,src/b.js
 
   -git-branch
-      Analyze files changed on the current local Git branch compared to the
-      origin base branch, including committed, staged, unstaged, and untracked
-      files. Cannot be combined with -files.
+      Search duplicate code only in files changed on the current local Git
+      branch. Cannot be combined with -files.
 
   -verbose
       Include duplicate block metrics in report output.

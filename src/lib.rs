@@ -7,11 +7,14 @@ pub mod model;
 pub mod paths;
 pub mod report;
 
+use std::collections::HashSet;
 use std::io::Write;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
 use crate::error::{CodeM8Error, Result};
+use crate::model::ProcessedFile;
+use crate::paths::format_path;
 
 /// Runs the CLI workflow and writes the selected report to the provided writer.
 ///
@@ -31,23 +34,31 @@ where
             .map_err(|error| CodeM8Error::new(format!("could not write help output: {error}")))?,
         cli::CliCommand::ReportDuplicate(config) => {
             let should_report_scanned_files = config.git_branch || config.files.is_some();
+            let git_branch_files = if config.git_branch {
+                Some(discovery::changed_files_against_origin(current_dir)?)
+            } else {
+                None
+            };
             let (source_files, discovery_duration) = time_result(config.verbose, || {
-                let git_branch_files = if config.git_branch {
-                    Some(discovery::changed_files_against_origin(current_dir)?)
-                } else {
-                    None
-                };
                 discovery::discover_source_files(
                     current_dir,
                     &config.file_extensions,
-                    git_branch_files.as_deref().or(config.files.as_deref()),
+                    if config.git_branch {
+                        None
+                    } else {
+                        config.files.as_deref()
+                    },
                 )
             })?;
             let (processed_files, file_processing_duration) =
                 time_result(config.verbose, || line::process_source_files(&source_files))?;
+            let duplicate_source_files = git_branch_files.as_deref().map_or_else(
+                || processed_files.clone(),
+                |git_branch_files| filtered_processed_files(&processed_files, git_branch_files),
+            );
             let (duplicate_blocks, duplicate_detection_duration) =
                 time_value(config.verbose, || {
-                    report::detect_duplicate_blocks(&processed_files)
+                    report::detect_duplicate_blocks(&duplicate_source_files)
                 });
             let report = report::DuplicateReport {
                 analyzed_files: source_files.len(),
@@ -99,10 +110,28 @@ fn time_value<T>(enabled: bool, operation: impl FnOnce() -> T) -> (T, Option<Dur
     (value, started_at.map(|instant| instant.elapsed()))
 }
 
+fn filtered_processed_files(
+    processed_files: &[ProcessedFile],
+    selected_files: &[std::path::PathBuf],
+) -> Vec<ProcessedFile> {
+    let selected_files = selected_files
+        .iter()
+        .map(|path| format_path(path))
+        .collect::<HashSet<_>>();
+    processed_files
+        .iter()
+        .filter(|processed_file| {
+            selected_files.contains(&format_path(&processed_file.source.display_path))
+        })
+        .cloned()
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
+    use std::process::Command;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
@@ -132,10 +161,6 @@ mod tests {
             }
             fs::write(path, contents).expect("write test file");
         }
-
-        fn path(&self) -> &Path {
-            &self.path
-        }
     }
 
     impl Drop for TempProject {
@@ -144,10 +169,86 @@ mod tests {
         }
     }
 
-    fn run_in(project: &TempProject, args: &[&str]) -> std::result::Result<String, CodeM8Error> {
+    impl AsRef<Path> for TempProject {
+        fn as_ref(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    struct TempGitRepo {
+        path: PathBuf,
+    }
+
+    impl TempGitRepo {
+        fn new(name: &str) -> Self {
+            let id = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+            let path =
+                std::env::temp_dir().join(format!("codem8-git-{name}-{}-{id}", std::process::id()));
+            if path.exists() {
+                fs::remove_dir_all(&path).expect("remove stale test directory");
+            }
+            fs::create_dir_all(&path).expect("create test directory");
+            Self { path }
+        }
+
+        fn write(&self, relative_path: &str, contents: &str) {
+            let path = self.path.join(relative_path);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).expect("create test parent directory");
+            }
+            fs::write(path, contents).expect("write test file");
+        }
+
+        fn git(&self, args: &[&str]) {
+            let status = Command::new("git")
+                .arg("-C")
+                .arg(&self.path)
+                .args(args)
+                .status()
+                .expect("run git");
+            assert!(status.success(), "git command failed: {args:?}");
+        }
+
+        fn commit(&self, message: &str) {
+            self.git(&["add", "."]);
+            self.git(&[
+                "-c",
+                "user.name=CodeM8 Test",
+                "-c",
+                "user.email=codem8@example.invalid",
+                "commit",
+                "-m",
+                message,
+            ]);
+        }
+    }
+
+    impl Drop for TempGitRepo {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    impl AsRef<Path> for TempGitRepo {
+        fn as_ref(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    fn run_in<P: AsRef<Path>>(
+        project: P,
+        args: &[&str],
+    ) -> std::result::Result<String, CodeM8Error> {
         let mut output = Vec::new();
-        run(args.iter().copied(), project.path(), &mut output)?;
+        run(args.iter().copied(), project.as_ref(), &mut output)?;
         Ok(String::from_utf8(output).expect("report is UTF-8"))
+    }
+
+    fn git_is_available() -> bool {
+        Command::new("git")
+            .arg("--version")
+            .status()
+            .is_ok_and(|status| status.success())
     }
 
     #[test]
@@ -256,6 +357,25 @@ mod tests {
             .expect("report succeeds");
         assert!(js_output.contains("Number of files scanned: 2"));
         assert!(js_output.contains("Duplicate blocks found: 1"));
+    }
+
+    #[test]
+    fn git_branch_mode_limits_duplicate_search_to_changed_files() {
+        if !git_is_available() {
+            return;
+        }
+        let project = TempGitRepo::new("git-branch-scope");
+        project.git(&["init"]);
+        project.write("src/a.ts", "const original = 1;\n");
+        project.write("src/b.ts", "const shared = 1;\n");
+        project.commit("initial");
+        project.git(&["update-ref", "refs/remotes/origin/main", "HEAD"]);
+        project.git(&["branch", "-M", "feature"]);
+        project.write("src/a.ts", "const shared = 1;\n");
+        let output =
+            run_in(&project, &["--report-duplicate", "-git-branch"]).expect("report succeeds");
+        assert!(output.contains("Number of files scanned: 2"));
+        assert!(output.contains("Duplicate blocks found: 0"));
     }
 
     #[test]
