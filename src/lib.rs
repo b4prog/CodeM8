@@ -33,7 +33,7 @@ where
             .write_all(cli::help_text().as_bytes())
             .map_err(|error| CodeM8Error::new(format!("could not write help output: {error}")))?,
         cli::CliCommand::ReportDuplicate(config) => {
-            let should_report_scanned_files = config.git_branch || config.files.is_some();
+            let should_report_analyzed_files = config.git_branch || config.files.is_some();
             let git_branch_files = if config.git_branch {
                 Some(discovery::changed_files_against_origin(current_dir)?)
             } else {
@@ -61,12 +61,12 @@ where
                     report::detect_duplicate_blocks(&duplicate_source_files)
                 });
             let report = report::DuplicateReport {
-                analyzed_files: source_files.len(),
+                analyzed_files: duplicate_source_files.len(),
                 analyzed_extensions: config.file_extensions,
-                scanned_files: should_report_scanned_files.then(|| {
-                    source_files
+                analyzed_file_paths: should_report_analyzed_files.then(|| {
+                    duplicate_source_files
                         .iter()
-                        .map(|source_file| source_file.display_path.clone())
+                        .map(|processed_file| processed_file.source.display_path.clone())
                         .collect()
                 }),
                 timings: match (
@@ -272,7 +272,7 @@ mod tests {
                 "Duplicate Code Report\n",
                 "=====================\n",
                 "\n",
-                "Number of files scanned: 2\n",
+                "Number of files analyzed: 2\n",
                 "Analyzed extensions: ",
                 &expected_extensions,
                 "\n",
@@ -320,26 +320,26 @@ mod tests {
         project.write("src/b.ts", "const value = one;\n");
         let output =
             run_in(&project, &["--report-duplicate", "-files=src/a.ts"]).expect("report succeeds");
-        assert!(output.contains("Number of files scanned: 1"));
+        assert!(output.contains("Number of files analyzed: 1"));
         assert!(output.contains("Duplicate blocks found: 0"));
     }
 
     #[test]
-    fn verbose_explicit_files_report_lists_scanned_files() {
+    fn verbose_explicit_files_report_lists_analyzed_files() {
         let project = TempProject::new("verbose-explicit-files");
         project.write("src/a.ts", "const value = one;\n");
         project.write("src/b.ts", "const value = one;\n");
         let quiet_output =
             run_in(&project, &["--report-duplicate", "-files=src/a.ts"]).expect("report succeeds");
-        assert!(!quiet_output.contains("Files scanned:"));
+        assert!(!quiet_output.contains("Files analyzed:"));
         let verbose_output = run_in(
             &project,
             &["--report-duplicate", "-verbose", "-files=src/a.ts"],
         )
         .expect("report succeeds");
         assert!(verbose_output.contains(
-            "Number of files scanned: 1\n\
-             Files scanned:\n\
+            "Number of files analyzed: 1\n\
+             Files analyzed:\n\
              - src/a.ts\n\
              Analyzed extensions:"
         ));
@@ -351,11 +351,11 @@ mod tests {
         project.write("src/a.js", "const value = one;\n");
         project.write("src/b.js", "const value = one;\n");
         let default_output = run_in(&project, &["--report-duplicate"]).expect("report succeeds");
-        assert!(default_output.contains("Number of files scanned: 2"));
+        assert!(default_output.contains("Number of files analyzed: 2"));
         assert!(default_output.contains("Duplicate blocks found: 1"));
         let js_output = run_in(&project, &["--report-duplicate", "-file-extension=js"])
             .expect("report succeeds");
-        assert!(js_output.contains("Number of files scanned: 2"));
+        assert!(js_output.contains("Number of files analyzed: 2"));
         assert!(js_output.contains("Duplicate blocks found: 1"));
     }
 
@@ -374,7 +374,7 @@ mod tests {
         project.write("src/a.ts", "const shared = 1;\n");
         let output =
             run_in(&project, &["--report-duplicate", "-git-branch"]).expect("report succeeds");
-        assert!(output.contains("Number of files scanned: 2"));
+        assert!(output.contains("Number of files analyzed: 1"));
         assert!(output.contains("Duplicate blocks found: 0"));
     }
 
