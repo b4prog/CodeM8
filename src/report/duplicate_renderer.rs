@@ -9,7 +9,7 @@ use crate::paths::format_path;
 pub struct DuplicateReport {
     pub analyzed_files: usize,
     pub analyzed_extensions: Vec<String>,
-    pub scanned_files: Option<Vec<PathBuf>>,
+    pub analyzed_file_paths: Option<Vec<PathBuf>>,
     pub timings: Option<DuplicateReportTimings>,
     pub duplicate_blocks: Vec<DuplicateBlock>,
 }
@@ -26,15 +26,19 @@ pub fn render_duplicate_report(report: &DuplicateReport, verbose: bool) -> Strin
     let mut output = String::new();
     output.push_str("Duplicate Code Report\n");
     output.push_str("=====================\n\n");
-    let _ = writeln!(output, "Number of files scanned: {}", report.analyzed_files);
-    let scanned_files = if verbose {
-        report.scanned_files.as_ref()
+    let _ = writeln!(
+        output,
+        "Number of files analyzed: {}",
+        report.analyzed_files
+    );
+    let analyzed_file_paths = if verbose {
+        report.analyzed_file_paths.as_ref()
     } else {
         None
     };
-    if let Some(scanned_files) = scanned_files {
-        output.push_str("Files scanned:\n");
-        for file in scanned_files {
+    if let Some(analyzed_file_paths) = analyzed_file_paths {
+        output.push_str("Files analyzed:\n");
+        for file in analyzed_file_paths {
             let _ = writeln!(output, "- {}", format_path(file));
         }
     }
@@ -124,7 +128,7 @@ mod tests {
         let report = DuplicateReport {
             analyzed_files: 0,
             analyzed_extensions: vec!["ts".to_string()],
-            scanned_files: None,
+            analyzed_file_paths: None,
             timings: None,
             duplicate_blocks: Vec::new(),
         };
@@ -133,7 +137,7 @@ mod tests {
             "Duplicate Code Report\n\
              =====================\n\
              \n\
-             Number of files scanned: 0\n\
+             Number of files analyzed: 0\n\
              Analyzed extensions: ts\n\
              Duplicate blocks found: 0\n"
         );
@@ -144,7 +148,7 @@ mod tests {
         let report = DuplicateReport {
             analyzed_files: 2,
             analyzed_extensions: vec!["ts".to_string(), "js".to_string()],
-            scanned_files: None,
+            analyzed_file_paths: None,
             timings: None,
             duplicate_blocks: vec![DuplicateBlock {
                 normalized_lines: vec!["return value;".to_string()],
@@ -181,7 +185,7 @@ mod tests {
         let report = DuplicateReport {
             analyzed_files: 0,
             analyzed_extensions: vec!["ts".to_string(), "js".to_string(), "rs".to_string()],
-            scanned_files: None,
+            analyzed_file_paths: None,
             timings: None,
             duplicate_blocks: Vec::new(),
         };
@@ -194,7 +198,7 @@ mod tests {
         let report = DuplicateReport {
             analyzed_files: 2,
             analyzed_extensions: vec!["ts".to_string()],
-            scanned_files: None,
+            analyzed_file_paths: None,
             timings: None,
             duplicate_blocks: vec![DuplicateBlock {
                 normalized_lines: vec!["return value;".to_string()],
@@ -224,11 +228,11 @@ mod tests {
     }
 
     #[test]
-    fn renders_scanned_file_list_only_in_verbose_mode() {
+    fn renders_analyzed_file_list_only_in_verbose_mode() {
         let report = DuplicateReport {
             analyzed_files: 2,
             analyzed_extensions: vec!["ts".to_string()],
-            scanned_files: Some(vec![
+            analyzed_file_paths: Some(vec![
                 PathBuf::from("src/a.ts"),
                 PathBuf::from("src/nested/b.ts"),
             ]),
@@ -236,11 +240,11 @@ mod tests {
             duplicate_blocks: Vec::new(),
         };
         let quiet_output = render_duplicate_report(&report, false);
-        assert!(!quiet_output.contains("Files scanned:"));
+        assert!(!quiet_output.contains("Files analyzed:"));
         let verbose_output = render_duplicate_report(&report, true);
         assert!(verbose_output.contains(
-            "Number of files scanned: 2\n\
-             Files scanned:\n\
+            "Number of files analyzed: 2\n\
+             Files analyzed:\n\
              - src/a.ts\n\
              - src/nested/b.ts\n\
              Analyzed extensions: ts"
@@ -252,7 +256,7 @@ mod tests {
         let report = DuplicateReport {
             analyzed_files: 1,
             analyzed_extensions: vec!["ts".to_string()],
-            scanned_files: None,
+            analyzed_file_paths: None,
             timings: Some(DuplicateReportTimings {
                 discovery: Duration::from_micros(1_234),
                 file_processing: Duration::from_micros(12_345),
