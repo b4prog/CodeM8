@@ -254,19 +254,21 @@ fn parse_quoted_diff_path(path: &str) -> Result<String> {
             "could not parse changed git header: +++ {path}"
         )));
     };
-    let mut parsed = String::new();
+    let mut parsed = Vec::new();
     let mut chars = quoted.chars();
     while let Some(ch) = chars.next() {
         if ch != '\\' {
-            parsed.push(ch);
+            let mut buffer = [0_u8; 4];
+            parsed.extend_from_slice(ch.encode_utf8(&mut buffer).as_bytes());
             continue;
         }
         parsed.push(parse_diff_escape(&mut chars, path)?);
     }
-    Ok(parsed)
+    String::from_utf8(parsed)
+        .map_err(|_| CodeM8Error::new(format!("could not parse changed git header: +++ {path}")))
 }
 
-fn parse_diff_escape(chars: &mut std::str::Chars<'_>, path: &str) -> Result<char> {
+fn parse_diff_escape(chars: &mut std::str::Chars<'_>, path: &str) -> Result<u8> {
     let escaped = chars.next().ok_or_else(|| {
         CodeM8Error::new(format!("could not parse changed git header: +++ {path}"))
     })?;
@@ -282,27 +284,23 @@ fn parse_diff_escape(chars: &mut std::str::Chars<'_>, path: &str) -> Result<char
     Ok(parsed)
 }
 
-fn simple_diff_escape(escaped: char) -> Option<char> {
+fn simple_diff_escape(escaped: char) -> Option<u8> {
     [
-        ('\\', '\\'),
-        ('"', '"'),
-        ('a', '\u{0007}'),
-        ('b', '\u{0008}'),
-        ('f', '\u{000C}'),
-        ('n', '\n'),
-        ('r', '\r'),
-        ('t', '\t'),
-        ('v', '\u{000B}'),
+        ('\\', b'\\'),
+        ('"', b'"'),
+        ('a', 0x07),
+        ('b', 0x08),
+        ('f', 0x0C),
+        ('n', b'\n'),
+        ('r', b'\r'),
+        ('t', b'\t'),
+        ('v', 0x0B),
     ]
     .into_iter()
     .find_map(|(pattern, value)| (escaped == pattern).then_some(value))
 }
 
-fn parse_diff_octal_escape(
-    chars: &mut std::str::Chars<'_>,
-    first: char,
-    path: &str,
-) -> Result<char> {
+fn parse_diff_octal_escape(chars: &mut std::str::Chars<'_>, first: char, path: &str) -> Result<u8> {
     let mut octal = String::from(first);
     while octal.len() < 3 {
         let Some(next) = chars.clone().next() else {
@@ -317,7 +315,7 @@ fn parse_diff_octal_escape(
     }
     let value = u8::from_str_radix(&octal, 8)
         .map_err(|_| CodeM8Error::new(format!("could not parse changed git header: +++ {path}")))?;
-    Ok(char::from(value))
+    Ok(value)
 }
 
 fn parse_hunk_range(line: &str) -> Result<Option<LineRange>> {
@@ -610,6 +608,24 @@ mod tests {
             files,
             [ChangedFileLines {
                 path: PathBuf::from("src/space file.ts"),
+                lines: vec![LineRange { start: 1, end: 1 }],
+            }]
+        );
+    }
+
+    #[test]
+    fn parses_changed_lines_for_non_ascii_quoted_diff_paths() {
+        let diff = concat!(
+            "diff --git \"a/src/caf\\303\\251.ts\" \"b/src/caf\\303\\251.ts\"\n",
+            "--- \"a/src/caf\\303\\251.ts\"\n",
+            "+++ \"b/src/caf\\303\\251.ts\"\n",
+            "@@ -0,0 +1 @@\n",
+        );
+        let files = parse_changed_lines(diff).expect("parse non-ascii quoted diff");
+        assert_eq!(
+            files,
+            [ChangedFileLines {
+                path: PathBuf::from("src/caf\u{00E9}.ts"),
                 lines: vec![LineRange { start: 1, end: 1 }],
             }]
         );
