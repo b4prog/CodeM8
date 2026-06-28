@@ -81,8 +81,11 @@ fn run_duplicate_report<W: Write>(
         config.verbose,
         current_dir,
         &config.file_extensions,
-        config.git_branch,
-        config.files.as_deref(),
+        if config.git_branch {
+            None
+        } else {
+            config.files.as_deref()
+        },
     )?;
     let (processed_files, file_processing_duration) =
         time_result(config.verbose, || line::process_source_files(&source_files))?;
@@ -122,17 +125,12 @@ fn run_complexity_report<W: Write>(
 ) -> Result<RunStatus> {
     let git_branch_files = changed_git_branch_files(config, current_dir)?;
     let analyzed_extensions = report::complexity_supported_file_extensions(&config.file_extensions);
-    let (source_files, discovery_duration) = discover_report_files(
+    let (complexity_source_files, discovery_duration) = discover_report_files(
         config.verbose,
         current_dir,
         &analyzed_extensions,
-        config.git_branch,
-        config.files.as_deref(),
+        git_branch_files.as_deref().or(config.files.as_deref()),
     )?;
-    let complexity_source_files = git_branch_files.as_deref().map_or_else(
-        || source_files.clone(),
-        |git_branch_files| filtered_source_files(&source_files, git_branch_files),
-    );
     let (functions, complexity_analysis_duration) = time_result(config.verbose, || {
         report::detect_complex_functions(
             &complexity_source_files,
@@ -175,15 +173,10 @@ fn discover_report_files(
     verbose: bool,
     current_dir: &Path,
     file_extensions: &[String],
-    git_branch: bool,
     files: Option<&[std::path::PathBuf]>,
 ) -> Result<(Vec<SourceFile>, Option<Duration>)> {
     time_result(verbose, || {
-        discovery::discover_source_files(
-            current_dir,
-            file_extensions,
-            if git_branch { None } else { files },
-        )
+        discovery::discover_source_files(current_dir, file_extensions, files)
     })
 }
 
@@ -251,21 +244,6 @@ fn filtered_processed_files(
         .filter(|processed_file| {
             selected_files.contains(&format_path(&processed_file.source.display_path))
         })
-        .cloned()
-        .collect()
-}
-
-fn filtered_source_files(
-    source_files: &[SourceFile],
-    selected_files: &[std::path::PathBuf],
-) -> Vec<SourceFile> {
-    let selected_files = selected_files
-        .iter()
-        .map(|path| format_path(path))
-        .collect::<HashSet<_>>();
-    source_files
-        .iter()
-        .filter(|source_file| selected_files.contains(&format_path(&source_file.display_path)))
         .cloned()
         .collect()
 }
