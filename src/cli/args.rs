@@ -20,6 +20,8 @@ struct ClapCli {
     verbose: u8,
     #[arg(long = "codem8-git-branch", action = ArgAction::Count)]
     git_branch: u8,
+    #[arg(long = "codem8-git-branch-strict", action = ArgAction::Count)]
+    git_branch_strict: u8,
     #[arg(
         long = "codem8-file-extension",
         value_name = "extensions",
@@ -62,7 +64,9 @@ where
     let report = selected_report(&parsed)?;
     validate_repeated_options(&parsed)?;
     let git_branch = parsed.git_branch != 0;
-    let files = selected_files(&parsed, git_branch)?;
+    let git_branch_strict = parsed.git_branch_strict != 0;
+    let files = selected_files(&parsed, git_branch || git_branch_strict)?;
+    validate_git_branch_modes(git_branch, git_branch_strict)?;
     validate_complexity_limits(report, &parsed)?;
     Ok(CliConfig {
         report,
@@ -70,6 +74,7 @@ where
         file_extensions: selected_file_extensions(&parsed),
         files,
         git_branch,
+        git_branch_strict,
         max_cognitive_complexity: parsed
             .max_cognitive_complexity
             .unwrap_or(DEFAULT_MAX_COGNITIVE_COMPLEXITY),
@@ -109,6 +114,11 @@ fn validate_repeated_options(parsed: &ClapCli) -> Result<()> {
             "git branch mode was provided more than once",
         ));
     }
+    if parsed.git_branch_strict > 1 {
+        return Err(CodeM8Error::new(
+            "strict git branch mode was provided more than once",
+        ));
+    }
     if parsed.file_extensions.len() > 1 {
         return Err(CodeM8Error::new(
             "file extensions were provided more than once",
@@ -117,6 +127,15 @@ fn validate_repeated_options(parsed: &ClapCli) -> Result<()> {
     if parsed.files.len() > 1 {
         return Err(CodeM8Error::new(
             "explicit files were provided more than once",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_git_branch_modes(git_branch: bool, git_branch_strict: bool) -> Result<()> {
+    if git_branch && git_branch_strict {
+        return Err(CodeM8Error::new(
+            "git branch mode and strict git branch mode are mutually exclusive",
         ));
     }
     Ok(())
@@ -260,6 +279,8 @@ fn normalized_clap_arg(arg: String) -> Result<String> {
         Ok("--codem8-verbose".to_owned())
     } else if arg == "-git-branch" {
         Ok("--codem8-git-branch".to_owned())
+    } else if arg == "-git-branch-strict" {
+        Ok("--codem8-git-branch-strict".to_owned())
     } else if let Some(value) = arg.strip_prefix("-file-extension=") {
         Ok(format!("--codem8-file-extension={value}"))
     } else if let Some(value) = arg.strip_prefix("-files=") {
@@ -289,6 +310,7 @@ mod tests {
         assert_eq!(config.file_extensions, supported_file_extensions());
         assert_eq!(config.files, None);
         assert!(!config.git_branch);
+        assert!(!config.git_branch_strict);
         assert_eq!(
             config.max_cognitive_complexity,
             DEFAULT_MAX_COGNITIVE_COMPLEXITY
@@ -336,6 +358,16 @@ mod tests {
     fn parses_git_branch_duplicate_report_config() {
         let config = parse_args(["--report-duplicate", "-git-branch"]).expect("config parses");
         assert!(config.git_branch);
+        assert!(!config.git_branch_strict);
+        assert_eq!(config.files, None);
+    }
+
+    #[test]
+    fn parses_strict_git_branch_duplicate_report_config() {
+        let config =
+            parse_args(["--report-duplicate", "-git-branch-strict"]).expect("config parses");
+        assert!(!config.git_branch);
+        assert!(config.git_branch_strict);
         assert_eq!(config.files, None);
     }
 
@@ -387,6 +419,7 @@ mod tests {
             "--file-extension=js",
             "--files=src/a.ts",
             "--git-branch",
+            "--git-branch-strict",
             "--max-cognitive-complexity=20",
             "--max-cyclomatic-complexity=12",
         ] {
@@ -462,9 +495,38 @@ mod tests {
     }
 
     #[test]
+    fn rejects_repeated_strict_git_branch_arguments() {
+        let error = parse_args([
+            "--report-duplicate",
+            "-git-branch-strict",
+            "-git-branch-strict",
+        ])
+        .expect_err("repeated strict git branch mode fails");
+        assert!(error
+            .to_string()
+            .contains("strict git branch mode was provided more than once"));
+    }
+
+    #[test]
+    fn rejects_git_branch_with_strict_git_branch() {
+        let error = parse_args(["--report-duplicate", "-git-branch", "-git-branch-strict"])
+            .expect_err("exclusive git branch modes fail");
+        assert!(error.to_string().contains("mutually exclusive"));
+    }
+
+    #[test]
     fn rejects_git_branch_with_explicit_files() {
         let error = parse_args(["--report-duplicate", "-git-branch", "-files=a.ts"])
             .expect_err("exclusive file modes fail");
+        assert!(error
+            .to_string()
+            .contains("git branch mode cannot be combined with explicit files"));
+    }
+
+    #[test]
+    fn rejects_strict_git_branch_with_explicit_files() {
+        let error = parse_args(["--report-duplicate", "-git-branch-strict", "-files=a.ts"])
+            .expect_err("exclusive strict file modes fail");
         assert!(error
             .to_string()
             .contains("git branch mode cannot be combined with explicit files"));

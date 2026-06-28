@@ -1,6 +1,24 @@
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LineRange {
+    pub start: usize,
+    pub end: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChangedFileLines {
+    pub path: PathBuf,
+    pub lines: Vec<LineRange>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnalyzedFile {
+    pub path: PathBuf,
+    pub changed_lines: Option<Vec<LineRange>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LineStatus {
     Comparison,
     BlockOnly,

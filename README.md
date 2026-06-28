@@ -24,7 +24,7 @@ codem8 --report-complexity
 Install `codem8` from the GitHub source with Cargo:
 
 ```bash
-cargo install --git https://github.com/b4prog/CodeM8 codem8
+cargo install --locked --git https://github.com/b4prog/CodeM8 codem8
 ```
 
 Build from a local checkout with Cargo:

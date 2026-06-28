@@ -11,13 +11,32 @@ pub mod report;
 
 use std::collections::HashSet;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use crate::error::{CodeM8Error, Result};
 use crate::model::SourceFile;
-use crate::model::{DuplicateBlock, ProcessedFile};
+use crate::model::{
+    AnalyzedFile, ChangedFileLines, DuplicateBlock, DuplicateOccurrence, FunctionComplexity,
+    LineRange, ProcessedFile,
+};
 use crate::paths::format_path;
+
+struct BranchScope {
+    files: Option<Vec<PathBuf>>,
+    lines: Option<Vec<ChangedFileLines>>,
+    strict_file_paths: Option<Vec<PathBuf>>,
+}
+
+impl BranchScope {
+    fn files(&self) -> Option<&[PathBuf]> {
+        self.files.as_deref().or(self.strict_file_paths.as_deref())
+    }
+
+    fn lines(&self) -> Option<&[ChangedFileLines]> {
+        self.lines.as_deref()
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunStatus {
@@ -76,39 +95,26 @@ fn run_duplicate_report<W: Write>(
     current_dir: &Path,
     writer: &mut W,
 ) -> Result<RunStatus> {
-    let git_branch_files = changed_git_branch_files(config, current_dir)?;
+    let branch_scope = changed_branch_scope(config, current_dir)?;
     let (source_files, discovery_duration) = discover_report_files(
         config.verbose,
         current_dir,
         &config.file_extensions,
-        if config.git_branch {
-            None
-        } else {
-            config.files.as_deref()
-        },
+        duplicate_discovery_files(config),
     )?;
     let (processed_files, file_processing_duration) =
         time_result(config.verbose, || line::process_source_files(&source_files))?;
-    let analyzed_source_files = git_branch_files.as_deref().map_or_else(
-        || processed_files.clone(),
-        |git_branch_files| filtered_processed_files(&processed_files, git_branch_files),
-    );
+    let analyzed_source_files = filtered_processed_files_for_scope(&processed_files, &branch_scope);
     let (duplicate_blocks, duplicate_detection_duration) = time_value(config.verbose, || {
         report::detect_duplicate_blocks(&processed_files)
     });
-    let duplicate_blocks = match git_branch_files.as_deref() {
-        Some(git_branch_files) => filtered_duplicate_blocks(duplicate_blocks, git_branch_files),
-        None => duplicate_blocks,
-    };
+    let duplicate_blocks = filtered_duplicate_blocks_for_scope(duplicate_blocks, &branch_scope);
     let report = report::DuplicateReport {
         analyzed_files: analyzed_source_files.len(),
         analyzed_extensions: config.file_extensions.clone(),
-        analyzed_file_paths: config.verbose.then(|| {
-            analyzed_source_files
-                .iter()
-                .map(|processed_file| processed_file.source.display_path.clone())
-                .collect()
-        }),
+        analyzed_file_paths: config
+            .verbose
+            .then(|| analyzed_processed_files(&analyzed_source_files, branch_scope.lines())),
         timings: duplicate_timings(
             discovery_duration,
             file_processing_duration,
@@ -127,13 +133,13 @@ fn run_complexity_report<W: Write>(
     current_dir: &Path,
     writer: &mut W,
 ) -> Result<RunStatus> {
-    let git_branch_files = changed_git_branch_files(config, current_dir)?;
+    let branch_scope = changed_branch_scope(config, current_dir)?;
     let analyzed_extensions = report::complexity_supported_file_extensions(&config.file_extensions);
     let (complexity_source_files, discovery_duration) = discover_report_files(
         config.verbose,
         current_dir,
         &analyzed_extensions,
-        git_branch_files.as_deref().or(config.files.as_deref()),
+        branch_scope.files().or(config.files.as_deref()),
     )?;
     let (functions, complexity_analysis_duration) = time_result(config.verbose, || {
         report::detect_complex_functions(
@@ -142,15 +148,16 @@ fn run_complexity_report<W: Write>(
             config.max_cyclomatic_complexity,
         )
     })?;
+    let functions = match branch_scope.lines() {
+        Some(git_branch_lines) => filtered_strict_complex_functions(functions, git_branch_lines),
+        None => functions,
+    };
     let report = report::ComplexityReport {
         analyzed_files: complexity_source_files.len(),
         analyzed_extensions,
-        analyzed_file_paths: config.verbose.then(|| {
-            complexity_source_files
-                .iter()
-                .map(|source_file| source_file.display_path.clone())
-                .collect()
-        }),
+        analyzed_file_paths: config
+            .verbose
+            .then(|| analyzed_source_file_paths(&complexity_source_files, branch_scope.lines())),
         max_cognitive_complexity: config.max_cognitive_complexity,
         max_cyclomatic_complexity: config.max_cyclomatic_complexity,
         timings: complexity_timings(discovery_duration, complexity_analysis_duration),
@@ -162,14 +169,44 @@ fn run_complexity_report<W: Write>(
     Ok(status)
 }
 
+fn changed_branch_scope(config: &cli::CliConfig, current_dir: &Path) -> Result<BranchScope> {
+    let files = changed_git_branch_files(config, current_dir)?;
+    let lines = changed_git_branch_lines(config, current_dir)?;
+    let strict_file_paths = lines.as_ref().map(|lines| changed_line_paths(lines));
+    Ok(BranchScope {
+        files,
+        lines,
+        strict_file_paths,
+    })
+}
+
 fn changed_git_branch_files(
     config: &cli::CliConfig,
     current_dir: &Path,
-) -> Result<Option<Vec<std::path::PathBuf>>> {
+) -> Result<Option<Vec<PathBuf>>> {
     if config.git_branch {
         discovery::changed_files_against_origin(current_dir).map(Some)
     } else {
         Ok(None)
+    }
+}
+
+fn changed_git_branch_lines(
+    config: &cli::CliConfig,
+    current_dir: &Path,
+) -> Result<Option<Vec<ChangedFileLines>>> {
+    if config.git_branch_strict {
+        discovery::changed_lines_against_origin(current_dir).map(Some)
+    } else {
+        Ok(None)
+    }
+}
+
+fn duplicate_discovery_files(config: &cli::CliConfig) -> Option<&[PathBuf]> {
+    if config.git_branch || config.git_branch_strict {
+        None
+    } else {
+        config.files.as_deref()
     }
 }
 
@@ -237,7 +274,7 @@ fn time_value<T>(enabled: bool, operation: impl FnOnce() -> T) -> (T, Option<Dur
 
 fn filtered_processed_files(
     processed_files: &[ProcessedFile],
-    selected_files: &[std::path::PathBuf],
+    selected_files: &[PathBuf],
 ) -> Vec<ProcessedFile> {
     let selected_files = selected_files
         .iter()
@@ -252,9 +289,19 @@ fn filtered_processed_files(
         .collect()
 }
 
+fn filtered_processed_files_for_scope(
+    processed_files: &[ProcessedFile],
+    branch_scope: &BranchScope,
+) -> Vec<ProcessedFile> {
+    branch_scope.files().map_or_else(
+        || processed_files.to_vec(),
+        |files| filtered_processed_files(processed_files, files),
+    )
+}
+
 fn filtered_duplicate_blocks(
     duplicate_blocks: Vec<DuplicateBlock>,
-    selected_files: &[std::path::PathBuf],
+    selected_files: &[PathBuf],
 ) -> Vec<DuplicateBlock> {
     let selected_files = selected_files
         .iter()
@@ -269,6 +316,121 @@ fn filtered_duplicate_blocks(
                 .any(|occurrence| selected_files.contains(&format_path(&occurrence.file_path)))
         })
         .collect()
+}
+
+fn filtered_duplicate_blocks_for_scope(
+    duplicate_blocks: Vec<DuplicateBlock>,
+    branch_scope: &BranchScope,
+) -> Vec<DuplicateBlock> {
+    let duplicate_blocks = match branch_scope.files() {
+        Some(files) => filtered_duplicate_blocks(duplicate_blocks, files),
+        None => duplicate_blocks,
+    };
+    match branch_scope.lines() {
+        Some(lines) => filtered_strict_duplicate_blocks(duplicate_blocks, lines),
+        None => duplicate_blocks,
+    }
+}
+
+fn changed_line_paths(changed_lines: &[ChangedFileLines]) -> Vec<PathBuf> {
+    changed_lines
+        .iter()
+        .map(|changed_file| changed_file.path.clone())
+        .collect()
+}
+
+fn analyzed_processed_files(
+    processed_files: &[ProcessedFile],
+    changed_lines: Option<&[ChangedFileLines]>,
+) -> Vec<AnalyzedFile> {
+    processed_files
+        .iter()
+        .map(|processed_file| analyzed_file(&processed_file.source.display_path, changed_lines))
+        .collect()
+}
+
+fn analyzed_source_file_paths(
+    source_files: &[SourceFile],
+    changed_lines: Option<&[ChangedFileLines]>,
+) -> Vec<AnalyzedFile> {
+    source_files
+        .iter()
+        .map(|source_file| analyzed_file(&source_file.display_path, changed_lines))
+        .collect()
+}
+
+fn analyzed_file(path: &Path, changed_lines: Option<&[ChangedFileLines]>) -> AnalyzedFile {
+    AnalyzedFile {
+        path: path.to_path_buf(),
+        changed_lines: changed_lines
+            .and_then(|changed_lines| changed_lines_for_path(path, changed_lines)),
+    }
+}
+
+fn changed_lines_for_path(
+    path: &Path,
+    changed_lines: &[ChangedFileLines],
+) -> Option<Vec<LineRange>> {
+    let formatted_path = format_path(path);
+    changed_lines
+        .iter()
+        .find(|changed_file| format_path(&changed_file.path) == formatted_path)
+        .map(|changed_file| changed_file.lines.clone())
+}
+
+fn filtered_strict_duplicate_blocks(
+    duplicate_blocks: Vec<DuplicateBlock>,
+    changed_lines: &[ChangedFileLines],
+) -> Vec<DuplicateBlock> {
+    duplicate_blocks
+        .into_iter()
+        .filter(|duplicate_block| {
+            duplicate_block_applies_to_changed_lines(duplicate_block, changed_lines)
+        })
+        .collect()
+}
+
+fn duplicate_block_applies_to_changed_lines(
+    duplicate_block: &DuplicateBlock,
+    changed_lines: &[ChangedFileLines],
+) -> bool {
+    duplicate_block
+        .occurrences
+        .iter()
+        .any(|occurrence| occurrence_applies_to_changed_lines(occurrence, changed_lines))
+}
+
+fn occurrence_applies_to_changed_lines(
+    occurrence: &DuplicateOccurrence,
+    changed_lines: &[ChangedFileLines],
+) -> bool {
+    changed_lines_for_path(&occurrence.file_path, changed_lines).is_some_and(|lines| {
+        ranges_overlap_lines(occurrence.start_line, occurrence.end_line, &lines)
+    })
+}
+
+fn filtered_strict_complex_functions(
+    functions: Vec<FunctionComplexity>,
+    changed_lines: &[ChangedFileLines],
+) -> Vec<FunctionComplexity> {
+    functions
+        .into_iter()
+        .filter(|function| function_applies_to_changed_lines(function, changed_lines))
+        .collect()
+}
+
+fn function_applies_to_changed_lines(
+    function: &FunctionComplexity,
+    changed_lines: &[ChangedFileLines],
+) -> bool {
+    changed_lines_for_path(&function.file_path, changed_lines)
+        .is_some_and(|lines| ranges_overlap_lines(function.start_line, function.end_line, &lines))
+}
+
+fn ranges_overlap_lines(start: usize, end: usize, lines: &[LineRange]) -> bool {
+    lines
+        .iter()
+        .any(|line_range| start <= line_range.end && end >= line_range.start)
 }
 
 #[cfg(test)]
@@ -588,6 +750,59 @@ mod tests {
     }
 
     #[test]
+    fn strict_git_branch_mode_reports_duplicates_only_on_changed_lines() {
+        if !git_is_available() {
+            return;
+        }
+        let project = TempGitRepo::new("strict-duplicate-lines");
+        project.git(&["init"]);
+        project.write("src/a.ts", "const shared = 1;\nconst branch = 1;\n");
+        project.write("src/b.ts", "const shared = 1;\n");
+        project.commit("initial");
+        project.git(&["update-ref", "refs/remotes/origin/main", "HEAD"]);
+        project.git(&["branch", "-M", "feature"]);
+        project.write("src/a.ts", "const shared = 1;\nconst branch = 2;\n");
+        let output = run_in(&project, &["--report-duplicate", "-git-branch-strict"])
+            .expect("report succeeds");
+        assert!(output.contains("Number of files analyzed: 1"));
+        assert!(output.contains("Duplicate blocks found: 0"));
+        project.write("src/a.ts", "const changed = 1;\nconst branch = 2;\n");
+        project.commit("branch change");
+        project.write("src/b.ts", "const changed = 1;\n");
+        let output = run_in(&project, &["--report-duplicate", "-git-branch-strict"])
+            .expect("report succeeds");
+        assert!(output.contains("Duplicate blocks found: 1"));
+        assert!(output.contains("- src/a.ts:1-1"));
+        assert!(output.contains("- src/b.ts:1-1"));
+    }
+
+    #[test]
+    fn verbose_strict_git_branch_report_lists_changed_line_ranges() {
+        if !git_is_available() {
+            return;
+        }
+        let project = TempGitRepo::new("strict-verbose-ranges");
+        project.git(&["init"]);
+        project.write(
+            "src/a.ts",
+            "const one = 1;\nconst two = 2;\nconst three = 3;\n",
+        );
+        project.commit("initial");
+        project.git(&["update-ref", "refs/remotes/origin/main", "HEAD"]);
+        project.git(&["branch", "-M", "feature"]);
+        project.write(
+            "src/a.ts",
+            "const one = 1;\nconst two = 20;\nconst three = 30;\n",
+        );
+        let output = run_in(
+            &project,
+            &["--report-duplicate", "-git-branch-strict", "-verbose"],
+        )
+        .expect("report succeeds");
+        assert!(output.contains("Files analyzed:\n- src/a.ts (2-3)\n"));
+    }
+
+    #[test]
     fn complexity_report_lists_functions_over_limits() {
         let project = TempProject::new("complexity");
         project.write(
@@ -720,6 +935,83 @@ mod tests {
         .expect("report succeeds");
         assert!(output.contains("Number of files analyzed: 1"));
         assert!(output.contains("Functions exceeding limits: 0"));
+    }
+
+    #[test]
+    fn strict_git_branch_mode_reports_complexity_only_for_changed_functions() {
+        if !git_is_available() {
+            return;
+        }
+        let project = TempGitRepo::new("strict-complexity-lines");
+        project.git(&["init"]);
+        project.write(
+            "src/lib.rs",
+            "fn risky(value: i32) -> i32 {\n\
+             if value > 10 {\n\
+             return 10;\n\
+             }\n\
+             if value > 5 {\n\
+             return 5;\n\
+             }\n\
+             0\n\
+             }\n\
+             const VALUE: i32 = 1;\n",
+        );
+        project.commit("initial");
+        project.git(&["update-ref", "refs/remotes/origin/main", "HEAD"]);
+        project.git(&["branch", "-M", "feature"]);
+        project.write(
+            "src/lib.rs",
+            "fn risky(value: i32) -> i32 {\n\
+             if value > 10 {\n\
+             return 10;\n\
+             }\n\
+             if value > 5 {\n\
+             return 5;\n\
+             }\n\
+             0\n\
+             }\n\
+             const VALUE: i32 = 2;\n",
+        );
+        let output = run_in(
+            &project,
+            &[
+                "--report-complexity",
+                "-git-branch-strict",
+                "-file-extension=rs",
+                "-max-cognitive-complexity=1",
+                "-max-cyclomatic-complexity=1",
+            ],
+        )
+        .expect("report succeeds");
+        assert!(output.contains("Number of files analyzed: 1"));
+        assert!(output.contains("Functions exceeding limits: 0"));
+        project.write(
+            "src/lib.rs",
+            "fn risky(value: i32) -> i32 {\n\
+             if value > 10 {\n\
+             return 11;\n\
+             }\n\
+             if value > 5 {\n\
+             return 5;\n\
+             }\n\
+             0\n\
+             }\n\
+             const VALUE: i32 = 2;\n",
+        );
+        let output = run_in(
+            &project,
+            &[
+                "--report-complexity",
+                "-git-branch-strict",
+                "-file-extension=rs",
+                "-max-cognitive-complexity=1",
+                "-max-cyclomatic-complexity=1",
+            ],
+        )
+        .expect("report succeeds");
+        assert!(output.contains("Functions exceeding limits: 1"));
+        assert!(output.contains("Function: risky"));
     }
 
     #[test]

@@ -4,7 +4,7 @@ mod explicit;
 mod git;
 mod recursive;
 
-pub(crate) use git::changed_files_against_origin;
+pub(crate) use git::{changed_files_against_origin, changed_lines_against_origin};
 
 use crate::error::Result;
 use crate::model::SourceFile;

@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 use crate::error::{CodeM8Error, Result};
+use crate::model::{ChangedFileLines, LineRange};
 
 /// Lists files changed on the current branch compared to the origin base branch.
 ///
@@ -58,6 +59,62 @@ pub fn changed_files_against_origin(current_dir: &Path) -> Result<Vec<PathBuf>> 
         .into_iter()
         .filter_map(|path| existing_file_path(&repo_root, current_dir, &path))
         .collect())
+}
+
+/// Lists changed lines on the current branch compared to the origin base branch.
+///
+/// # Errors
+///
+/// Returns an error when Git metadata cannot be resolved or diff output cannot
+/// be parsed.
+pub fn changed_lines_against_origin(current_dir: &Path) -> Result<Vec<ChangedFileLines>> {
+    let repo_root = repo_root(current_dir)?;
+    ensure_named_branch(&repo_root)?;
+    let origin_ref = origin_base_ref(&repo_root)?;
+    let merge_base = run_git_text(
+        &repo_root,
+        &["merge-base", &origin_ref, "HEAD"],
+        "find merge base with origin base branch",
+    )?;
+    let mut changed_files = Vec::new();
+    extend_changed_lines(
+        &repo_root,
+        current_dir,
+        &[
+            "diff",
+            "--unified=0",
+            "--no-color",
+            "--diff-filter=ACMRTUXB",
+            merge_base.trim(),
+            "HEAD",
+        ],
+        &mut changed_files,
+    )?;
+    extend_changed_lines(
+        &repo_root,
+        current_dir,
+        &[
+            "diff",
+            "--unified=0",
+            "--no-color",
+            "--cached",
+            "--diff-filter=ACMRTUXB",
+        ],
+        &mut changed_files,
+    )?;
+    extend_changed_lines(
+        &repo_root,
+        current_dir,
+        &[
+            "diff",
+            "--unified=0",
+            "--no-color",
+            "--diff-filter=ACMRTUXB",
+        ],
+        &mut changed_files,
+    )?;
+    extend_untracked_changed_lines(&repo_root, current_dir, &mut changed_files)?;
+    Ok(changed_files)
 }
 
 fn repo_root(current_dir: &Path) -> Result<PathBuf> {
@@ -118,6 +175,134 @@ fn collect_nul_paths(repo_root: &Path, args: &[&str], paths: &mut BTreeSet<PathB
         paths.insert(path);
     }
     Ok(())
+}
+
+fn extend_changed_lines(
+    repo_root: &Path,
+    current_dir: &Path,
+    args: &[&str],
+    changed_files: &mut Vec<ChangedFileLines>,
+) -> Result<()> {
+    let output = run_git_output(repo_root, args, "list changed git lines")?;
+    let stdout = ensure_git_success(output, "list changed git lines")?;
+    let text = output_text(stdout, "parse changed git lines")?;
+    for changed_file in parse_changed_lines(&text)? {
+        if let Some(path) = existing_file_path(repo_root, current_dir, &changed_file.path) {
+            merge_changed_file(changed_files, path, changed_file.lines);
+        }
+    }
+    Ok(())
+}
+
+fn extend_untracked_changed_lines(
+    repo_root: &Path,
+    current_dir: &Path,
+    changed_files: &mut Vec<ChangedFileLines>,
+) -> Result<()> {
+    let output = run_git_output(
+        repo_root,
+        &["ls-files", "--others", "--exclude-standard", "-z"],
+        "list untracked git files",
+    )?;
+    let stdout = ensure_git_success(output, "list untracked git files")?;
+    for path in nul_paths(&stdout) {
+        if let Some(display_path) = existing_file_path(repo_root, current_dir, &path) {
+            let line_count = count_lines(&repo_root.join(path), &display_path)?;
+            let lines = (line_count != 0)
+                .then_some(vec![LineRange {
+                    start: 1,
+                    end: line_count,
+                }])
+                .unwrap_or_default();
+            merge_changed_file(changed_files, display_path, lines);
+        }
+    }
+    Ok(())
+}
+
+fn parse_changed_lines(text: &str) -> Result<Vec<ChangedFileLines>> {
+    let mut files = Vec::new();
+    let mut current_path = None::<PathBuf>;
+    for line in text.lines() {
+        if let Some(path) = line.strip_prefix("+++ b/") {
+            current_path = Some(PathBuf::from(path));
+        } else if line == "+++ /dev/null" {
+            current_path = None;
+        } else if line.starts_with("@@ ") {
+            let path = current_path.clone().ok_or_else(|| {
+                CodeM8Error::new("could not parse changed git lines: missing file")
+            })?;
+            let range = parse_hunk_range(line)?;
+            push_parsed_range(&mut files, path, range);
+        }
+    }
+    Ok(files)
+}
+
+fn parse_hunk_range(line: &str) -> Result<Option<LineRange>> {
+    let added = line
+        .split_whitespace()
+        .find(|part| part.starts_with('+'))
+        .ok_or_else(|| CodeM8Error::new(format!("could not parse changed git hunk: {line}")))?;
+    let added = added.trim_start_matches('+');
+    let (start, count) = added
+        .split_once(',')
+        .map_or((added, "1"), |(start, count)| (start, count));
+    let start = start
+        .parse::<usize>()
+        .map_err(|_| CodeM8Error::new(format!("could not parse changed git hunk: {line}")))?;
+    let count = count
+        .parse::<usize>()
+        .map_err(|_| CodeM8Error::new(format!("could not parse changed git hunk: {line}")))?;
+    Ok((count != 0).then_some(LineRange {
+        start,
+        end: start + count - 1,
+    }))
+}
+
+fn push_parsed_range(files: &mut Vec<ChangedFileLines>, path: PathBuf, range: Option<LineRange>) {
+    if let Some(range) = range {
+        merge_changed_file(files, path, vec![range]);
+    }
+}
+
+fn merge_changed_file(
+    changed_files: &mut Vec<ChangedFileLines>,
+    path: PathBuf,
+    lines: Vec<LineRange>,
+) {
+    if let Some(changed_file) = changed_files.iter_mut().find(|file| file.path == path) {
+        changed_file.lines.extend(lines);
+        changed_file.lines = merged_ranges(&changed_file.lines);
+    } else {
+        changed_files.push(ChangedFileLines {
+            path,
+            lines: merged_ranges(&lines),
+        });
+        changed_files.sort_by(|left, right| left.path.cmp(&right.path));
+    }
+}
+
+fn merged_ranges(lines: &[LineRange]) -> Vec<LineRange> {
+    let mut ranges = lines.to_vec();
+    ranges.sort_by_key(|range| (range.start, range.end));
+    let mut merged = Vec::<LineRange>::new();
+    for range in ranges {
+        if let Some(last) = merged.last_mut() {
+            if range.start <= last.end + 1 {
+                last.end = last.end.max(range.end);
+                continue;
+            }
+        }
+        merged.push(range);
+    }
+    merged
+}
+
+fn count_lines(path: &Path, display_path: &Path) -> Result<usize> {
+    let contents = fs::read_to_string(path)
+        .map_err(|error| CodeM8Error::io(display_path, "read file", &error))?;
+    Ok(contents.lines().count())
 }
 
 fn existing_file_path(repo_root: &Path, current_dir: &Path, path: &Path) -> Option<PathBuf> {

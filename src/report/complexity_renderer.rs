@@ -1,15 +1,14 @@
 use std::fmt::Write as _;
-use std::path::PathBuf;
 use std::time::Duration;
 
-use crate::model::FunctionComplexity;
+use crate::model::{AnalyzedFile, FunctionComplexity, LineRange};
 use crate::paths::format_path;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComplexityReport {
     pub analyzed_files: usize,
     pub analyzed_extensions: Vec<String>,
-    pub analyzed_file_paths: Option<Vec<PathBuf>>,
+    pub analyzed_file_paths: Option<Vec<AnalyzedFile>>,
     pub max_cognitive_complexity: u32,
     pub max_cyclomatic_complexity: u32,
     pub timings: Option<ComplexityReportTimings>,
@@ -83,12 +82,41 @@ pub fn render_complexity_report(report: &ComplexityReport, verbose: bool) -> Str
     output
 }
 
-fn render_analyzed_files(output: &mut String, analyzed_file_paths: Option<&[PathBuf]>) {
+fn render_analyzed_files(output: &mut String, analyzed_file_paths: Option<&[AnalyzedFile]>) {
     if let Some(analyzed_file_paths) = analyzed_file_paths {
         output.push_str("Files analyzed:\n");
         for file in analyzed_file_paths {
-            let _ = writeln!(output, "- {}", format_path(file));
+            let _ = writeln!(output, "- {}", format_analyzed_file(file));
         }
+    }
+}
+
+fn format_analyzed_file(file: &AnalyzedFile) -> String {
+    match file.changed_lines.as_deref() {
+        Some(lines) if !lines.is_empty() => {
+            format!(
+                "{} ({})",
+                format_path(&file.path),
+                format_line_ranges(lines)
+            )
+        }
+        Some(_) | None => format_path(&file.path),
+    }
+}
+
+fn format_line_ranges(lines: &[LineRange]) -> String {
+    lines
+        .iter()
+        .map(format_line_range)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn format_line_range(range: &LineRange) -> String {
+    if range.start == range.end {
+        range.start.to_string()
+    } else {
+        format!("{}-{}", range.start, range.end)
     }
 }
 
@@ -191,7 +219,10 @@ mod tests {
         let report = ComplexityReport {
             analyzed_files: 1,
             analyzed_extensions: vec!["rs".to_string()],
-            analyzed_file_paths: Some(vec![PathBuf::from("src/lib.rs")]),
+            analyzed_file_paths: Some(vec![AnalyzedFile {
+                path: PathBuf::from("src/lib.rs"),
+                changed_lines: None,
+            }]),
             max_cognitive_complexity: 15,
             max_cyclomatic_complexity: 10,
             timings: Some(ComplexityReportTimings {
@@ -204,5 +235,26 @@ mod tests {
         assert!(output.contains("Files analyzed:\n- src/lib.rs\n"));
         assert!(output.contains("- Discovery: 1.234 ms\n"));
         assert!(output.contains("- Complexity analysis: 12.345 ms\n"));
+    }
+
+    #[test]
+    fn renders_verbose_changed_line_ranges() {
+        let report = ComplexityReport {
+            analyzed_files: 1,
+            analyzed_extensions: vec!["rs".to_string()],
+            analyzed_file_paths: Some(vec![AnalyzedFile {
+                path: PathBuf::from("src/lib.rs"),
+                changed_lines: Some(vec![
+                    LineRange { start: 3, end: 17 },
+                    LineRange { start: 21, end: 21 },
+                ]),
+            }]),
+            max_cognitive_complexity: 15,
+            max_cyclomatic_complexity: 10,
+            timings: None,
+            functions: Vec::new(),
+        };
+        let output = render_complexity_report(&report, true);
+        assert!(output.contains("Files analyzed:\n- src/lib.rs (3-17,21)\n"));
     }
 }
