@@ -15,8 +15,8 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use crate::error::{CodeM8Error, Result};
-use crate::model::ProcessedFile;
 use crate::model::SourceFile;
+use crate::model::{DuplicateBlock, ProcessedFile};
 use crate::paths::format_path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -89,18 +89,22 @@ fn run_duplicate_report<W: Write>(
     )?;
     let (processed_files, file_processing_duration) =
         time_result(config.verbose, || line::process_source_files(&source_files))?;
-    let duplicate_source_files = git_branch_files.as_deref().map_or_else(
+    let analyzed_source_files = git_branch_files.as_deref().map_or_else(
         || processed_files.clone(),
         |git_branch_files| filtered_processed_files(&processed_files, git_branch_files),
     );
     let (duplicate_blocks, duplicate_detection_duration) = time_value(config.verbose, || {
-        report::detect_duplicate_blocks(&duplicate_source_files)
+        report::detect_duplicate_blocks(&processed_files)
     });
+    let duplicate_blocks = match git_branch_files.as_deref() {
+        Some(git_branch_files) => filtered_duplicate_blocks(duplicate_blocks, git_branch_files),
+        None => duplicate_blocks,
+    };
     let report = report::DuplicateReport {
-        analyzed_files: duplicate_source_files.len(),
+        analyzed_files: analyzed_source_files.len(),
         analyzed_extensions: config.file_extensions.clone(),
         analyzed_file_paths: config.verbose.then(|| {
-            duplicate_source_files
+            analyzed_source_files
                 .iter()
                 .map(|processed_file| processed_file.source.display_path.clone())
                 .collect()
@@ -245,6 +249,25 @@ fn filtered_processed_files(
             selected_files.contains(&format_path(&processed_file.source.display_path))
         })
         .cloned()
+        .collect()
+}
+
+fn filtered_duplicate_blocks(
+    duplicate_blocks: Vec<DuplicateBlock>,
+    selected_files: &[std::path::PathBuf],
+) -> Vec<DuplicateBlock> {
+    let selected_files = selected_files
+        .iter()
+        .map(|path| format_path(path))
+        .collect::<HashSet<_>>();
+    duplicate_blocks
+        .into_iter()
+        .filter(|duplicate_block| {
+            duplicate_block
+                .occurrences
+                .iter()
+                .any(|occurrence| selected_files.contains(&format_path(&occurrence.file_path)))
+        })
         .collect()
 }
 
@@ -524,7 +547,7 @@ mod tests {
     }
 
     #[test]
-    fn git_branch_mode_limits_duplicate_search_to_changed_files() {
+    fn git_branch_mode_reports_duplicates_for_changed_files_against_repo() {
         if !git_is_available() {
             return;
         }
@@ -536,6 +559,28 @@ mod tests {
         project.git(&["update-ref", "refs/remotes/origin/main", "HEAD"]);
         project.git(&["branch", "-M", "feature"]);
         project.write("src/a.ts", "const shared = 1;\n");
+        let output =
+            run_in(&project, &["--report-duplicate", "-git-branch"]).expect("report succeeds");
+        assert!(output.contains("Number of files analyzed: 1"));
+        assert!(output.contains("Duplicate blocks found: 1"));
+        assert!(output.contains("- src/a.ts:1-1"));
+        assert!(output.contains("- src/b.ts:1-1"));
+    }
+
+    #[test]
+    fn git_branch_mode_excludes_duplicates_without_changed_files() {
+        if !git_is_available() {
+            return;
+        }
+        let project = TempGitRepo::new("git-branch-duplicate-filter");
+        project.git(&["init"]);
+        project.write("src/a.ts", "const branch = 1;\n");
+        project.write("src/b.ts", "const shared = 1;\n");
+        project.write("src/c.ts", "const shared = 1;\n");
+        project.commit("initial");
+        project.git(&["update-ref", "refs/remotes/origin/main", "HEAD"]);
+        project.git(&["branch", "-M", "feature"]);
+        project.write("src/a.ts", "const branch = 2;\n");
         let output =
             run_in(&project, &["--report-duplicate", "-git-branch"]).expect("report succeeds");
         assert!(output.contains("Number of files analyzed: 1"));
