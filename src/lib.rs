@@ -76,7 +76,6 @@ fn run_duplicate_report<W: Write>(
     current_dir: &Path,
     writer: &mut W,
 ) -> Result<RunStatus> {
-    let should_report_analyzed_files = config.git_branch || config.files.is_some();
     let git_branch_files = changed_git_branch_files(config, current_dir)?;
     let (source_files, discovery_duration) = discover_report_files(
         config.verbose,
@@ -97,7 +96,7 @@ fn run_duplicate_report<W: Write>(
     let report = report::DuplicateReport {
         analyzed_files: duplicate_source_files.len(),
         analyzed_extensions: config.file_extensions.clone(),
-        analyzed_file_paths: should_report_analyzed_files.then(|| {
+        analyzed_file_paths: config.verbose.then(|| {
             duplicate_source_files
                 .iter()
                 .map(|processed_file| processed_file.source.display_path.clone())
@@ -121,7 +120,6 @@ fn run_complexity_report<W: Write>(
     current_dir: &Path,
     writer: &mut W,
 ) -> Result<RunStatus> {
-    let should_report_analyzed_files = config.git_branch || config.files.is_some();
     let git_branch_files = changed_git_branch_files(config, current_dir)?;
     let analyzed_extensions = report::complexity_supported_file_extensions(&config.file_extensions);
     let (source_files, discovery_duration) = discover_report_files(
@@ -145,7 +143,7 @@ fn run_complexity_report<W: Write>(
     let report = report::ComplexityReport {
         analyzed_files: complexity_source_files.len(),
         analyzed_extensions,
-        analyzed_file_paths: should_report_analyzed_files.then(|| {
+        analyzed_file_paths: config.verbose.then(|| {
             complexity_source_files
                 .iter()
                 .map(|source_file| source_file.display_path.clone())
@@ -518,6 +516,22 @@ mod tests {
     }
 
     #[test]
+    fn verbose_recursive_duplicate_report_lists_analyzed_files() {
+        let project = TempProject::new("verbose-recursive-duplicate");
+        project.write("src/a.ts", "const first = one;\n");
+        project.write("src/b.ts", "const second = two;\n");
+        let output =
+            run_in(&project, &["--report-duplicate", "-verbose"]).expect("report succeeds");
+        assert!(output.contains(
+            "Number of files analyzed: 2\n\
+             Files analyzed:\n\
+             - src/a.ts\n\
+             - src/b.ts\n\
+             Analyzed extensions:"
+        ));
+    }
+
+    #[test]
     fn custom_extensions_change_analyzed_files() {
         let project = TempProject::new("custom-extensions");
         project.write("src/a.js", "const value = one;\n");
@@ -620,6 +634,22 @@ mod tests {
         let output = run_in(&project, &["--report-complexity"]).expect("report succeeds");
         assert!(output.contains("Number of files analyzed: 0"));
         assert!(output.contains("Functions exceeding limits: 0"));
+    }
+
+    #[test]
+    fn verbose_recursive_complexity_report_lists_analyzed_files() {
+        let project = TempProject::new("verbose-recursive-complexity");
+        project.write("src/main.rs", "fn main() {\n}\n");
+        project.write("src/lib.rs", "fn lib() {\n}\n");
+        let output =
+            run_in(&project, &["--report-complexity", "-verbose"]).expect("report succeeds");
+        assert!(output.contains(
+            "Number of files analyzed: 2\n\
+             Files analyzed:\n\
+             - src/lib.rs\n\
+             - src/main.rs\n\
+             Analyzed extensions:"
+        ));
     }
 
     #[test]

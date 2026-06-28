@@ -88,7 +88,7 @@ Reports exit with a non-zero status when they detect issues: duplicate blocks
 for `--report-duplicate`, or functions above the configured limits for
 `--report-complexity`.
 
-Include duplicate block metrics and timing information:
+Include analyzed files, report metrics, and timing information:
 
 ```bash
 codem8 --report-duplicate -verbose
@@ -128,10 +128,10 @@ Reports are sorted deterministically by descending weight, then by line count,
 character count, first location, and normalized block text.
 
 By default, each duplicate block prints only the duplicate locations. Use
-`-verbose` to also show the duplicated code, weight, line count, occurrence
-count, and timings for discovery, file processing, and duplicate detection.
-Character counts are used internally for scoring and sorting, but are not
-printed.
+`-verbose` to also show analyzed files, the duplicated code, weight, line count,
+occurrence count, and timings for discovery, file processing, and duplicate
+detection. Character counts are used internally for scoring and sorting, but are
+not printed.
 
 ## Complexity Report
 
@@ -147,6 +147,8 @@ cyclomatic complexity is 10. Use `-max-cognitive-complexity=<value>` and
 Use `-git-branch` to analyze complexity only in supported files changed on the
 current local branch. The same origin branch resolution and `-files` exclusion
 rules used by the duplicate report apply.
+
+Use `-verbose` to list analyzed files and timing information.
 
 ## Development
 
