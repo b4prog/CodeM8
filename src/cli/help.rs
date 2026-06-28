@@ -46,7 +46,7 @@ OPTIONS:
       Defaults to 10.
 
   -verbose
-      Include analyzed files, metrics, and timings in report output.
+      Include analyzed files and timings in report output, plus duplicate block details.
 
 DUPLICATE REPORT PURPOSE:
   The duplicate report helps you find repeated code that may be worth
