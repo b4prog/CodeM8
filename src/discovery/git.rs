@@ -276,9 +276,12 @@ fn merged_ranges(lines: &[LineRange]) -> Vec<LineRange> {
 }
 
 fn count_lines(path: &Path, display_path: &Path) -> Result<usize> {
-    let contents = fs::read_to_string(path)
-        .map_err(|error| CodeM8Error::io(display_path, "read file", &error))?;
-    Ok(contents.lines().count())
+    let contents =
+        fs::read(path).map_err(|error| CodeM8Error::io(display_path, "read file", &error))?;
+    if contents.is_empty() {
+        return Ok(0);
+    }
+    Ok(contents.split_inclusive(|byte| *byte == b'\n').count())
 }
 
 fn existing_file_path(repo_root: &Path, current_dir: &Path, path: &Path) -> Option<PathBuf> {
@@ -360,6 +363,14 @@ mod tests {
         }
 
         fn write(&self, relative_path: &str, contents: &str) {
+            let path = self.path.join(relative_path);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).expect("create parent directory");
+            }
+            fs::write(path, contents).expect("write test file");
+        }
+
+        fn write_bytes(&self, relative_path: &str, contents: &[u8]) {
             let path = self.path.join(relative_path);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent).expect("create parent directory");
@@ -478,6 +489,35 @@ mod tests {
                     LineRange { start: 7, end: 7 },
                 ],
             }]
+        );
+    }
+
+    #[test]
+    fn ignores_non_utf8_untracked_files_when_collecting_changed_lines() {
+        if !git_is_available() {
+            return;
+        }
+        let repo = TempGitRepo::new("non-utf8-untracked");
+        repo.git(&["init"]);
+        repo.write("src/base.ts", "const value = base;\n");
+        repo.commit("initial");
+        repo.git(&["update-ref", "refs/remotes/origin/main", "HEAD"]);
+        repo.git(&["branch", "-M", "feature"]);
+        repo.write("src/untracked.ts", "first line\nsecond line\n");
+        repo.write_bytes("assets/image.bin", &[0xFF, 0xFE, 0x00, b'\n', 0x80]);
+        let files = changed_lines_against_origin(repo.path()).expect("list changed lines");
+        assert_eq!(
+            files,
+            [
+                ChangedFileLines {
+                    path: PathBuf::from("assets/image.bin"),
+                    lines: vec![LineRange { start: 1, end: 2 }],
+                },
+                ChangedFileLines {
+                    path: PathBuf::from("src/untracked.ts"),
+                    lines: vec![LineRange { start: 1, end: 2 }],
+                },
+            ]
         );
     }
 }
