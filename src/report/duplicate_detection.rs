@@ -19,6 +19,18 @@ struct OccurrenceKey {
     end_line: usize,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct LineRange {
+    start: usize,
+    end: usize,
+}
+
+impl LineRange {
+    const fn overlaps(self, other: Self) -> bool {
+        !(self.end < other.start || other.end < self.start)
+    }
+}
+
 impl Ord for OccurrenceKey {
     fn cmp(&self, other: &Self) -> Ordering {
         self.file_path_key
@@ -35,6 +47,12 @@ impl PartialOrd for OccurrenceKey {
 }
 
 pub fn detect_duplicate_blocks(files: &[ProcessedFile]) -> Vec<DuplicateBlock> {
+    let line_index = indexed_lines(files);
+    let blocks_by_lines = candidate_blocks_by_lines(files, &line_index);
+    duplicate_blocks_from_candidates(blocks_by_lines)
+}
+
+fn indexed_lines(files: &[ProcessedFile]) -> HashMap<u128, Vec<LineRef>> {
     let mut line_index: HashMap<u128, Vec<LineRef>> = HashMap::new();
     for (file_index, file) in files.iter().enumerate() {
         for (line_index_in_file, line) in file.lines.iter().enumerate() {
@@ -44,6 +62,13 @@ pub fn detect_duplicate_blocks(files: &[ProcessedFile]) -> Vec<DuplicateBlock> {
             });
         }
     }
+    line_index
+}
+
+fn candidate_blocks_by_lines(
+    files: &[ProcessedFile],
+    line_index: &HashMap<u128, Vec<LineRef>>,
+) -> HashMap<Vec<String>, BTreeSet<OccurrenceKey>> {
     let mut blocks_by_lines: HashMap<Vec<String>, BTreeSet<OccurrenceKey>> = HashMap::new();
     for refs in line_index.values() {
         if refs.len() < 2 {
@@ -67,35 +92,52 @@ pub fn detect_duplicate_blocks(files: &[ProcessedFile]) -> Vec<DuplicateBlock> {
             collect_candidates(files, comparison_refs, &mut blocks_by_lines);
         }
     }
+    blocks_by_lines
+}
+
+fn duplicate_blocks_from_candidates(
+    blocks_by_lines: HashMap<Vec<String>, BTreeSet<OccurrenceKey>>,
+) -> Vec<DuplicateBlock> {
     let mut duplicate_blocks = blocks_by_lines
         .into_iter()
-        .filter_map(|(normalized_lines, occurrences)| {
-            if normalized_lines.is_empty() || occurrences.len() < 2 {
-                return None;
-            }
-            let occurrences = occurrences
-                .into_iter()
-                .map(|occurrence| DuplicateOccurrence {
-                    file_path: occurrence.file_path,
-                    start_line: occurrence.start_line,
-                    end_line: occurrence.end_line,
-                })
-                .collect::<Vec<_>>();
-            let character_count = normalized_lines
-                .iter()
-                .map(|line| line.chars().count() as u64)
-                .sum::<u64>();
-            let weight =
-                (occurrences.len() as u64 - 1) * normalized_lines.len() as u64 * character_count;
-            Some(DuplicateBlock {
-                normalized_lines,
-                occurrences,
-                weight,
-            })
-        })
+        .filter_map(duplicate_block_from_candidate)
         .collect::<Vec<_>>();
     duplicate_blocks.sort_by(compare_duplicate_blocks);
     duplicate_blocks
+}
+
+fn duplicate_block_from_candidate(
+    (normalized_lines, occurrences): (Vec<String>, BTreeSet<OccurrenceKey>),
+) -> Option<DuplicateBlock> {
+    if normalized_lines.is_empty() || occurrences.len() < 2 {
+        return None;
+    }
+    let occurrences = duplicate_occurrences(occurrences);
+    let weight = duplicate_block_weight(&normalized_lines, occurrences.len());
+    Some(DuplicateBlock {
+        normalized_lines,
+        occurrences,
+        weight,
+    })
+}
+
+fn duplicate_occurrences(occurrences: BTreeSet<OccurrenceKey>) -> Vec<DuplicateOccurrence> {
+    occurrences
+        .into_iter()
+        .map(|occurrence| DuplicateOccurrence {
+            file_path: occurrence.file_path,
+            start_line: occurrence.start_line,
+            end_line: occurrence.end_line,
+        })
+        .collect()
+}
+
+fn duplicate_block_weight(normalized_lines: &[String], occurrence_count: usize) -> u64 {
+    let character_count = normalized_lines
+        .iter()
+        .map(|line| line.chars().count() as u64)
+        .sum::<u64>();
+    (occurrence_count as u64 - 1) * normalized_lines.len() as u64 * character_count
 }
 
 #[derive(Debug)]
@@ -136,38 +178,91 @@ fn expand_pair(files: &[ProcessedFile], left: LineRef, right: LineRef) -> Option
     if left == right {
         return None;
     }
+    let (left_start, right_start) = expanded_start(files, left, right);
+    let (left_end, right_end) = expanded_end(files, left, right);
+    let left_range = LineRange {
+        start: left_start,
+        end: left_end,
+    };
+    let right_range = LineRange {
+        start: right_start,
+        end: right_end,
+    };
+    if overlaps_same_file(left, right, left_range, right_range) {
+        return None;
+    }
+    Some(CandidateBlock {
+        normalized_lines: normalized_lines(files, left.file_index, left_range),
+        left_occurrence: occurrence_for(files, left.file_index, left_range.start, left_range.end),
+        right_occurrence: occurrence_for(
+            files,
+            right.file_index,
+            right_range.start,
+            right_range.end,
+        ),
+    })
+}
+
+fn expanded_start(files: &[ProcessedFile], left: LineRef, right: LineRef) -> (usize, usize) {
     let mut left_start = left.line_index;
     let mut right_start = right.line_index;
-    while left_start > 0
-        && right_start > 0
-        && line_text(files, left.file_index, left_start - 1)
-            == line_text(files, right.file_index, right_start - 1)
-    {
+    while previous_lines_match(files, left, right, left_start, right_start) {
         left_start -= 1;
         right_start -= 1;
     }
+    (left_start, right_start)
+}
+
+fn previous_lines_match(
+    files: &[ProcessedFile],
+    left: LineRef,
+    right: LineRef,
+    left_start: usize,
+    right_start: usize,
+) -> bool {
+    left_start > 0
+        && right_start > 0
+        && line_text(files, left.file_index, left_start - 1)
+            == line_text(files, right.file_index, right_start - 1)
+}
+
+fn expanded_end(files: &[ProcessedFile], left: LineRef, right: LineRef) -> (usize, usize) {
     let mut left_end = left.line_index;
     let mut right_end = right.line_index;
-    while left_end + 1 < files[left.file_index].lines.len()
-        && right_end + 1 < files[right.file_index].lines.len()
-        && line_text(files, left.file_index, left_end + 1)
-            == line_text(files, right.file_index, right_end + 1)
-    {
+    while next_lines_match(files, left, right, left_end, right_end) {
         left_end += 1;
         right_end += 1;
     }
-    if left.file_index == right.file_index && left_start <= right_end && right_start <= left_end {
-        return None;
-    }
-    let normalized_lines = files[left.file_index].lines[left_start..=left_end]
+    (left_end, right_end)
+}
+
+fn next_lines_match(
+    files: &[ProcessedFile],
+    left: LineRef,
+    right: LineRef,
+    left_end: usize,
+    right_end: usize,
+) -> bool {
+    left_end + 1 < files[left.file_index].lines.len()
+        && right_end + 1 < files[right.file_index].lines.len()
+        && line_text(files, left.file_index, left_end + 1)
+            == line_text(files, right.file_index, right_end + 1)
+}
+
+const fn overlaps_same_file(
+    left: LineRef,
+    right: LineRef,
+    left_range: LineRange,
+    right_range: LineRange,
+) -> bool {
+    left.file_index == right.file_index && left_range.overlaps(right_range)
+}
+
+fn normalized_lines(files: &[ProcessedFile], file_index: usize, range: LineRange) -> Vec<String> {
+    files[file_index].lines[range.start..=range.end]
         .iter()
         .map(|line| line.normalized_text.clone())
-        .collect::<Vec<_>>();
-    Some(CandidateBlock {
-        normalized_lines,
-        left_occurrence: occurrence_for(files, left.file_index, left_start, left_end),
-        right_occurrence: occurrence_for(files, right.file_index, right_start, right_end),
-    })
+        .collect()
 }
 
 fn occurrence_for(

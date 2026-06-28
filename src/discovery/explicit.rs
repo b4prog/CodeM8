@@ -17,36 +17,8 @@ pub(super) fn discover_explicit_files(
     let mut source_files = Vec::new();
     let mut seen_paths = HashSet::new();
     for file in files {
-        let absolute_input = file.is_absolute();
-        let path = if absolute_input {
-            file.clone()
-        } else {
-            current_dir.join(file)
-        };
-        let metadata = fs::symlink_metadata(&path).map_err(|_| {
-            CodeM8Error::new(format!(
-                "explicit file does not exist: {}",
-                format_path(file)
-            ))
-        })?;
-        if metadata.file_type().is_symlink() {
-            return Err(CodeM8Error::new(format!(
-                "explicit file is a symbolic link and will not be followed: {}",
-                format_path(file)
-            )));
-        }
-        if metadata.is_dir() {
-            return Err(CodeM8Error::new(format!(
-                "explicit file is a directory: {}",
-                format_path(file)
-            )));
-        }
-        if !metadata.is_file() {
-            return Err(CodeM8Error::new(format!(
-                "explicit path is not a file: {}",
-                format_path(file)
-            )));
-        }
+        let path = explicit_input_path(current_dir, file);
+        explicit_file_metadata(file, &path)?;
         let Some(extension) = selected_extension(&path, extensions) else {
             continue;
         };
@@ -55,13 +27,7 @@ pub(super) fn discover_explicit_files(
         if !seen_paths.insert(canonical_path.clone()) {
             continue;
         }
-        let display_path = if absolute_input {
-            canonical_path
-                .strip_prefix(&canonical_current_dir)
-                .map_or_else(|_| normalize_display_path(file), normalize_display_path)
-        } else {
-            normalize_display_path(file)
-        };
+        let display_path = explicit_display_path(file, &canonical_path, &canonical_current_dir);
         source_files.push(SourceFile {
             path: canonical_path,
             display_path,
@@ -69,6 +35,61 @@ pub(super) fn discover_explicit_files(
         });
     }
     Ok(source_files)
+}
+
+fn explicit_input_path(current_dir: &Path, file: &Path) -> PathBuf {
+    if file.is_absolute() {
+        file.to_path_buf()
+    } else {
+        current_dir.join(file)
+    }
+}
+
+fn explicit_file_metadata(file: &Path, path: &Path) -> Result<fs::Metadata> {
+    let metadata = fs::symlink_metadata(path).map_err(|_| {
+        CodeM8Error::new(format!(
+            "explicit file does not exist: {}",
+            format_path(file)
+        ))
+    })?;
+    validate_explicit_file_metadata(file, &metadata)?;
+    Ok(metadata)
+}
+
+fn validate_explicit_file_metadata(file: &Path, metadata: &fs::Metadata) -> Result<()> {
+    if metadata.file_type().is_symlink() {
+        return Err(CodeM8Error::new(format!(
+            "explicit file is a symbolic link and will not be followed: {}",
+            format_path(file)
+        )));
+    }
+    if metadata.is_dir() {
+        return Err(CodeM8Error::new(format!(
+            "explicit file is a directory: {}",
+            format_path(file)
+        )));
+    }
+    if !metadata.is_file() {
+        return Err(CodeM8Error::new(format!(
+            "explicit path is not a file: {}",
+            format_path(file)
+        )));
+    }
+    Ok(())
+}
+
+fn explicit_display_path(
+    file: &Path,
+    canonical_path: &Path,
+    canonical_current_dir: &Path,
+) -> PathBuf {
+    if file.is_absolute() {
+        canonical_path
+            .strip_prefix(canonical_current_dir)
+            .map_or_else(|_| normalize_display_path(file), normalize_display_path)
+    } else {
+        normalize_display_path(file)
+    }
 }
 
 #[cfg(test)]

@@ -24,6 +24,12 @@ pub struct DuplicateReportTimings {
 #[must_use]
 pub fn render_duplicate_report(report: &DuplicateReport, verbose: bool) -> String {
     let mut output = String::new();
+    render_report_summary(&mut output, report, verbose);
+    render_duplicate_blocks(&mut output, &report.duplicate_blocks, verbose);
+    output
+}
+
+fn render_report_summary(output: &mut String, report: &DuplicateReport, verbose: bool) {
     output.push_str("Duplicate Code Report\n");
     output.push_str("=====================\n\n");
     let _ = writeln!(
@@ -38,9 +44,7 @@ pub fn render_duplicate_report(report: &DuplicateReport, verbose: bool) -> Strin
     };
     if let Some(analyzed_file_paths) = analyzed_file_paths {
         output.push_str("Files analyzed:\n");
-        for file in analyzed_file_paths {
-            let _ = writeln!(output, "- {}", format_path(file));
-        }
+        render_analyzed_files(output, analyzed_file_paths);
     }
     let _ = writeln!(
         output,
@@ -53,52 +57,72 @@ pub fn render_duplicate_report(report: &DuplicateReport, verbose: bool) -> Strin
         report.duplicate_blocks.len()
     );
     if verbose {
-        if let Some(timings) = report.timings {
-            output.push_str("Timings:\n");
-            let _ = writeln!(
-                output,
-                "- Discovery: {}",
-                format_duration(timings.discovery)
-            );
-            let _ = writeln!(
-                output,
-                "- File processing: {}",
-                format_duration(timings.file_processing)
-            );
-            let _ = writeln!(
-                output,
-                "- Duplicate detection: {}",
-                format_duration(timings.duplicate_detection)
-            );
-        }
+        render_timings(output, report.timings);
     }
-    for (index, block) in report.duplicate_blocks.iter().enumerate() {
+}
+
+fn render_analyzed_files(output: &mut String, analyzed_file_paths: &[PathBuf]) {
+    for file in analyzed_file_paths {
+        let _ = writeln!(output, "- {}", format_path(file));
+    }
+}
+
+fn render_timings(output: &mut String, timings: Option<DuplicateReportTimings>) {
+    if let Some(timings) = timings {
+        output.push_str("Timings:\n");
+        let _ = writeln!(
+            output,
+            "- Discovery: {}",
+            format_duration(timings.discovery)
+        );
+        let _ = writeln!(
+            output,
+            "- File processing: {}",
+            format_duration(timings.file_processing)
+        );
+        let _ = writeln!(
+            output,
+            "- Duplicate detection: {}",
+            format_duration(timings.duplicate_detection)
+        );
+    }
+}
+
+fn render_duplicate_blocks(output: &mut String, blocks: &[DuplicateBlock], verbose: bool) {
+    for (index, block) in blocks.iter().enumerate() {
         output.push('\n');
         let _ = writeln!(output, "#{}", index + 1);
         if verbose {
-            let _ = writeln!(output, "Weight: {}", block.weight);
-            let _ = writeln!(output, "Lines: {}", block.line_count());
-            let _ = writeln!(output, "Occurrences: {}", block.occurrences.len());
-            output.push('\n');
-            output.push_str("Code:\n");
-            for line in &block.normalized_lines {
-                output.push_str("  ");
-                output.push_str(line);
-                output.push('\n');
-            }
-            output.push_str("\nLocations:\n");
+            render_verbose_block(output, block);
         }
-        for occurrence in &block.occurrences {
-            let _ = writeln!(
-                output,
-                "- {}:{}-{}",
-                format_path(&occurrence.file_path),
-                occurrence.start_line,
-                occurrence.end_line
-            );
-        }
+        render_block_locations(output, block);
     }
-    output
+}
+
+fn render_verbose_block(output: &mut String, block: &DuplicateBlock) {
+    let _ = writeln!(output, "Weight: {}", block.weight);
+    let _ = writeln!(output, "Lines: {}", block.line_count());
+    let _ = writeln!(output, "Occurrences: {}", block.occurrences.len());
+    output.push('\n');
+    output.push_str("Code:\n");
+    for line in &block.normalized_lines {
+        output.push_str("  ");
+        output.push_str(line);
+        output.push('\n');
+    }
+    output.push_str("\nLocations:\n");
+}
+
+fn render_block_locations(output: &mut String, block: &DuplicateBlock) {
+    for occurrence in &block.occurrences {
+        let _ = writeln!(
+            output,
+            "- {}:{}-{}",
+            format_path(&occurrence.file_path),
+            occurrence.start_line,
+            occurrence.end_line
+        );
+    }
 }
 
 fn format_duration(duration: Duration) -> String {

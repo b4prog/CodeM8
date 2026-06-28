@@ -59,18 +59,34 @@ where
 {
     let parsed = ClapCli::try_parse_from(normalized_clap_args(args)?)
         .map_err(|error| CodeM8Error::new(error.to_string().trim().to_owned()))?;
+    let report = selected_report(&parsed)?;
+    validate_repeated_options(&parsed)?;
+    let git_branch = parsed.git_branch != 0;
+    let files = selected_files(&parsed, git_branch)?;
+    validate_complexity_limits(report, &parsed)?;
+    Ok(CliConfig {
+        report,
+        verbose: parsed.verbose != 0,
+        file_extensions: selected_file_extensions(&parsed),
+        files,
+        git_branch,
+        max_cognitive_complexity: parsed
+            .max_cognitive_complexity
+            .unwrap_or(DEFAULT_MAX_COGNITIVE_COMPLEXITY),
+        max_cyclomatic_complexity: parsed
+            .max_cyclomatic_complexity
+            .unwrap_or(DEFAULT_MAX_CYCLOMATIC_COMPLEXITY),
+    })
+}
+
+fn selected_report(parsed: &ClapCli) -> Result<ReportKind> {
     let report_count = parsed.report_duplicate + parsed.report_complexity;
     if report_count == 0 {
         return Err(CodeM8Error::with_help(
             "no report switch provided; pass --report-duplicate or --report-complexity",
         ));
     }
-    if parsed.report_duplicate > 1 {
-        return Err(CodeM8Error::new(
-            "report switch was provided more than once",
-        ));
-    }
-    if parsed.report_complexity > 1 {
+    if parsed.report_duplicate > 1 || parsed.report_complexity > 1 {
         return Err(CodeM8Error::new(
             "report switch was provided more than once",
         ));
@@ -80,6 +96,14 @@ where
             "--report-duplicate and --report-complexity are mutually exclusive",
         ));
     }
+    Ok(if parsed.report_duplicate != 0 {
+        ReportKind::Duplicate
+    } else {
+        ReportKind::Complexity
+    })
+}
+
+fn validate_repeated_options(parsed: &ClapCli) -> Result<()> {
     if parsed.git_branch > 1 {
         return Err(CodeM8Error::new(
             "git branch mode was provided more than once",
@@ -95,18 +119,20 @@ where
             "explicit files were provided more than once",
         ));
     }
-    let git_branch = parsed.git_branch != 0;
-    let files = parsed.files.into_iter().next();
+    Ok(())
+}
+
+fn selected_files(parsed: &ClapCli, git_branch: bool) -> Result<Option<Vec<PathBuf>>> {
+    let files = parsed.files.first().cloned();
     if git_branch && files.is_some() {
         return Err(CodeM8Error::new(
             "git branch mode cannot be combined with explicit files",
         ));
     }
-    let report = if parsed.report_duplicate != 0 {
-        ReportKind::Duplicate
-    } else {
-        ReportKind::Complexity
-    };
+    Ok(files)
+}
+
+fn validate_complexity_limits(report: ReportKind, parsed: &ClapCli) -> Result<()> {
     if report == ReportKind::Duplicate
         && (parsed.max_cognitive_complexity.is_some() || parsed.max_cyclomatic_complexity.is_some())
     {
@@ -114,23 +140,15 @@ where
             "complexity limits can only be used with --report-complexity",
         ));
     }
-    Ok(CliConfig {
-        report,
-        verbose: parsed.verbose != 0,
-        file_extensions: parsed
-            .file_extensions
-            .into_iter()
-            .next()
-            .unwrap_or_else(supported_file_extensions),
-        files,
-        git_branch,
-        max_cognitive_complexity: parsed
-            .max_cognitive_complexity
-            .unwrap_or(DEFAULT_MAX_COGNITIVE_COMPLEXITY),
-        max_cyclomatic_complexity: parsed
-            .max_cyclomatic_complexity
-            .unwrap_or(DEFAULT_MAX_CYCLOMATIC_COMPLEXITY),
-    })
+    Ok(())
+}
+
+fn selected_file_extensions(parsed: &ClapCli) -> Vec<String> {
+    parsed
+        .file_extensions
+        .first()
+        .cloned()
+        .unwrap_or_else(supported_file_extensions)
 }
 
 /// Parses a comma-separated list of file extensions.
