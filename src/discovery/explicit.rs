@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 
 use super::selected_extension;
@@ -46,11 +47,12 @@ fn explicit_input_path(current_dir: &Path, file: &Path) -> PathBuf {
 }
 
 fn explicit_file_metadata(file: &Path, path: &Path) -> Result<fs::Metadata> {
-    let metadata = fs::symlink_metadata(path).map_err(|_| {
-        CodeM8Error::new(format!(
+    let metadata = fs::symlink_metadata(path).map_err(|error| match error.kind() {
+        io::ErrorKind::NotFound => CodeM8Error::new(format!(
             "explicit file does not exist: {}",
             format_path(file)
-        ))
+        )),
+        _ => CodeM8Error::io(path, "read explicit file metadata", &error),
     })?;
     validate_explicit_file_metadata(file, &metadata)?;
     Ok(metadata)
@@ -172,6 +174,18 @@ mod tests {
         assert!(error
             .to_string()
             .contains("explicit file is a directory: src"));
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn explicit_files_report_missing_paths_as_not_found() {
+        let root = temp_dir("missing");
+        let error =
+            discover_explicit_files(&root, &["ts".to_string()], &[PathBuf::from("missing.ts")])
+                .expect_err("missing explicit file fails");
+        assert!(error
+            .to_string()
+            .contains("explicit file does not exist: missing.ts"));
         fs::remove_dir_all(root).expect("cleanup");
     }
 }
