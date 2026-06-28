@@ -1,15 +1,14 @@
 use std::fmt::Write as _;
-use std::path::PathBuf;
 use std::time::Duration;
 
-use crate::model::DuplicateBlock;
+use crate::model::{AnalyzedFile, DuplicateBlock, LineRange};
 use crate::paths::format_path;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DuplicateReport {
     pub analyzed_files: usize,
     pub analyzed_extensions: Vec<String>,
-    pub analyzed_file_paths: Option<Vec<PathBuf>>,
+    pub analyzed_file_paths: Option<Vec<AnalyzedFile>>,
     pub timings: Option<DuplicateReportTimings>,
     pub duplicate_blocks: Vec<DuplicateBlock>,
 }
@@ -61,9 +60,38 @@ fn render_report_summary(output: &mut String, report: &DuplicateReport, verbose:
     }
 }
 
-fn render_analyzed_files(output: &mut String, analyzed_file_paths: &[PathBuf]) {
+fn render_analyzed_files(output: &mut String, analyzed_file_paths: &[AnalyzedFile]) {
     for file in analyzed_file_paths {
-        let _ = writeln!(output, "- {}", format_path(file));
+        let _ = writeln!(output, "- {}", format_analyzed_file(file));
+    }
+}
+
+fn format_analyzed_file(file: &AnalyzedFile) -> String {
+    match file.changed_lines.as_deref() {
+        Some(lines) if !lines.is_empty() => {
+            format!(
+                "{} ({})",
+                format_path(&file.path),
+                format_line_ranges(lines)
+            )
+        }
+        Some(_) | None => format_path(&file.path),
+    }
+}
+
+fn format_line_ranges(lines: &[LineRange]) -> String {
+    lines
+        .iter()
+        .map(format_line_range)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn format_line_range(range: &LineRange) -> String {
+    if range.start == range.end {
+        range.start.to_string()
+    } else {
+        format!("{}-{}", range.start, range.end)
     }
 }
 
@@ -143,7 +171,7 @@ mod tests {
     use std::path::PathBuf;
     use std::time::Duration;
 
-    use crate::model::{DuplicateBlock, DuplicateOccurrence};
+    use crate::model::{AnalyzedFile, DuplicateBlock, DuplicateOccurrence};
 
     use super::*;
 
@@ -257,8 +285,14 @@ mod tests {
             analyzed_files: 2,
             analyzed_extensions: vec!["ts".to_string()],
             analyzed_file_paths: Some(vec![
-                PathBuf::from("src/a.ts"),
-                PathBuf::from("src/nested/b.ts"),
+                AnalyzedFile {
+                    path: PathBuf::from("src/a.ts"),
+                    changed_lines: None,
+                },
+                AnalyzedFile {
+                    path: PathBuf::from("src/nested/b.ts"),
+                    changed_lines: None,
+                },
             ]),
             timings: None,
             duplicate_blocks: Vec::new(),
