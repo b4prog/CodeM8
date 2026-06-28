@@ -42,6 +42,16 @@ pub struct DuplicateBlock {
     pub weight: u64,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct FunctionComplexity {
+    pub file_path: PathBuf,
+    pub function_name: String,
+    pub start_line: usize,
+    pub end_line: usize,
+    pub cognitive_complexity: f64,
+    pub cyclomatic_complexity: f64,
+}
+
 impl DuplicateBlock {
     #[must_use]
     pub fn line_count(&self) -> usize {

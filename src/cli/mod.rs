@@ -12,16 +12,24 @@ use crate::error::Result;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CliCommand {
     Help,
-    ReportDuplicate(CliConfig),
+    Report(CliConfig),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReportKind {
+    Duplicate,
+    Complexity,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CliConfig {
-    pub report_duplicate: bool,
+    pub report: ReportKind,
     pub verbose: bool,
     pub file_extensions: Vec<String>,
     pub files: Option<Vec<PathBuf>>,
     pub git_branch: bool,
+    pub max_cognitive_complexity: u32,
+    pub max_cyclomatic_complexity: u32,
 }
 
 /// Parses command-line arguments into a CLI command.
@@ -39,7 +47,7 @@ where
     if args.len() == 1 && is_help_argument(&args[0]) {
         return Ok(CliCommand::Help);
     }
-    parse_args(args).map(CliCommand::ReportDuplicate)
+    parse_args(args).map(CliCommand::Report)
 }
 
 fn is_help_argument(arg: &str) -> bool {

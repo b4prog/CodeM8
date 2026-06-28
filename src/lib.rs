@@ -1,3 +1,5 @@
+#![allow(clippy::multiple_crate_versions)]
+
 pub mod cli;
 pub mod discovery;
 pub mod error;
@@ -14,6 +16,7 @@ use std::time::{Duration, Instant};
 
 use crate::error::{CodeM8Error, Result};
 use crate::model::ProcessedFile;
+use crate::model::SourceFile;
 use crate::paths::format_path;
 
 /// Runs the CLI workflow and writes the selected report to the provided writer.
@@ -29,70 +32,169 @@ where
     W: Write,
 {
     match cli::parse_command(args)? {
-        cli::CliCommand::Help => writer
-            .write_all(cli::help_text().as_bytes())
-            .map_err(|error| CodeM8Error::new(format!("could not write help output: {error}")))?,
-        cli::CliCommand::ReportDuplicate(config) => {
-            let should_report_analyzed_files = config.git_branch || config.files.is_some();
-            let git_branch_files = if config.git_branch {
-                Some(discovery::changed_files_against_origin(current_dir)?)
-            } else {
-                None
-            };
-            let (source_files, discovery_duration) = time_result(config.verbose, || {
-                discovery::discover_source_files(
-                    current_dir,
-                    &config.file_extensions,
-                    if config.git_branch {
-                        None
-                    } else {
-                        config.files.as_deref()
-                    },
-                )
-            })?;
-            let (processed_files, file_processing_duration) =
-                time_result(config.verbose, || line::process_source_files(&source_files))?;
-            let duplicate_source_files = git_branch_files.as_deref().map_or_else(
-                || processed_files.clone(),
-                |git_branch_files| filtered_processed_files(&processed_files, git_branch_files),
-            );
-            let (duplicate_blocks, duplicate_detection_duration) =
-                time_value(config.verbose, || {
-                    report::detect_duplicate_blocks(&duplicate_source_files)
-                });
-            let report = report::DuplicateReport {
-                analyzed_files: duplicate_source_files.len(),
-                analyzed_extensions: config.file_extensions,
-                analyzed_file_paths: should_report_analyzed_files.then(|| {
-                    duplicate_source_files
-                        .iter()
-                        .map(|processed_file| processed_file.source.display_path.clone())
-                        .collect()
-                }),
-                timings: match (
-                    discovery_duration,
-                    file_processing_duration,
-                    duplicate_detection_duration,
-                ) {
-                    (Some(discovery), Some(file_processing), Some(duplicate_detection)) => {
-                        Some(report::DuplicateReportTimings {
-                            discovery,
-                            file_processing,
-                            duplicate_detection,
-                        })
-                    }
-                    _ => None,
-                },
-                duplicate_blocks,
-            };
-            writer
-                .write_all(report::render_duplicate_report(&report, config.verbose).as_bytes())
-                .map_err(|error| {
-                    CodeM8Error::new(format!("could not write report output: {error}"))
-                })?;
-        }
+        cli::CliCommand::Help => write_help(writer)?,
+        cli::CliCommand::Report(config) => match config.report {
+            cli::ReportKind::Duplicate => run_duplicate_report(&config, current_dir, writer)?,
+            cli::ReportKind::Complexity => run_complexity_report(&config, current_dir, writer)?,
+        },
     }
     Ok(())
+}
+
+fn write_help<W: Write>(writer: &mut W) -> Result<()> {
+    writer
+        .write_all(cli::help_text().as_bytes())
+        .map_err(|error| CodeM8Error::new(format!("could not write help output: {error}")))
+}
+
+fn run_duplicate_report<W: Write>(
+    config: &cli::CliConfig,
+    current_dir: &Path,
+    writer: &mut W,
+) -> Result<()> {
+    let should_report_analyzed_files = config.git_branch || config.files.is_some();
+    let git_branch_files = changed_git_branch_files(config, current_dir)?;
+    let (source_files, discovery_duration) = discover_report_files(
+        config.verbose,
+        current_dir,
+        &config.file_extensions,
+        config.git_branch,
+        config.files.as_deref(),
+    )?;
+    let (processed_files, file_processing_duration) =
+        time_result(config.verbose, || line::process_source_files(&source_files))?;
+    let duplicate_source_files = git_branch_files.as_deref().map_or_else(
+        || processed_files.clone(),
+        |git_branch_files| filtered_processed_files(&processed_files, git_branch_files),
+    );
+    let (duplicate_blocks, duplicate_detection_duration) = time_value(config.verbose, || {
+        report::detect_duplicate_blocks(&duplicate_source_files)
+    });
+    let report = report::DuplicateReport {
+        analyzed_files: duplicate_source_files.len(),
+        analyzed_extensions: config.file_extensions.clone(),
+        analyzed_file_paths: should_report_analyzed_files.then(|| {
+            duplicate_source_files
+                .iter()
+                .map(|processed_file| processed_file.source.display_path.clone())
+                .collect()
+        }),
+        timings: duplicate_timings(
+            discovery_duration,
+            file_processing_duration,
+            duplicate_detection_duration,
+        ),
+        duplicate_blocks,
+    };
+    let output = report::render_duplicate_report(&report, config.verbose);
+    write_report_output(writer, &output)
+}
+
+fn run_complexity_report<W: Write>(
+    config: &cli::CliConfig,
+    current_dir: &Path,
+    writer: &mut W,
+) -> Result<()> {
+    let should_report_analyzed_files = config.git_branch || config.files.is_some();
+    let git_branch_files = changed_git_branch_files(config, current_dir)?;
+    let analyzed_extensions = report::complexity_supported_file_extensions(&config.file_extensions);
+    let (source_files, discovery_duration) = discover_report_files(
+        config.verbose,
+        current_dir,
+        &analyzed_extensions,
+        config.git_branch,
+        config.files.as_deref(),
+    )?;
+    let complexity_source_files = git_branch_files.as_deref().map_or_else(
+        || source_files.clone(),
+        |git_branch_files| filtered_source_files(&source_files, git_branch_files),
+    );
+    let (functions, complexity_analysis_duration) = time_result(config.verbose, || {
+        report::detect_complex_functions(
+            &complexity_source_files,
+            config.max_cognitive_complexity,
+            config.max_cyclomatic_complexity,
+        )
+    })?;
+    let report = report::ComplexityReport {
+        analyzed_files: complexity_source_files.len(),
+        analyzed_extensions,
+        analyzed_file_paths: should_report_analyzed_files.then(|| {
+            complexity_source_files
+                .iter()
+                .map(|source_file| source_file.display_path.clone())
+                .collect()
+        }),
+        max_cognitive_complexity: config.max_cognitive_complexity,
+        max_cyclomatic_complexity: config.max_cyclomatic_complexity,
+        timings: complexity_timings(discovery_duration, complexity_analysis_duration),
+        functions,
+    };
+    let output = report::render_complexity_report(&report, config.verbose);
+    write_report_output(writer, &output)
+}
+
+fn changed_git_branch_files(
+    config: &cli::CliConfig,
+    current_dir: &Path,
+) -> Result<Option<Vec<std::path::PathBuf>>> {
+    if config.git_branch {
+        discovery::changed_files_against_origin(current_dir).map(Some)
+    } else {
+        Ok(None)
+    }
+}
+
+fn discover_report_files(
+    verbose: bool,
+    current_dir: &Path,
+    file_extensions: &[String],
+    git_branch: bool,
+    files: Option<&[std::path::PathBuf]>,
+) -> Result<(Vec<SourceFile>, Option<Duration>)> {
+    time_result(verbose, || {
+        discovery::discover_source_files(
+            current_dir,
+            file_extensions,
+            if git_branch { None } else { files },
+        )
+    })
+}
+
+const fn duplicate_timings(
+    discovery: Option<Duration>,
+    file_processing: Option<Duration>,
+    duplicate_detection: Option<Duration>,
+) -> Option<report::DuplicateReportTimings> {
+    match (discovery, file_processing, duplicate_detection) {
+        (Some(discovery), Some(file_processing), Some(duplicate_detection)) => {
+            Some(report::DuplicateReportTimings {
+                discovery,
+                file_processing,
+                duplicate_detection,
+            })
+        }
+        _ => None,
+    }
+}
+
+const fn complexity_timings(
+    discovery: Option<Duration>,
+    complexity_analysis: Option<Duration>,
+) -> Option<report::ComplexityReportTimings> {
+    match (discovery, complexity_analysis) {
+        (Some(discovery), Some(complexity_analysis)) => Some(report::ComplexityReportTimings {
+            discovery,
+            complexity_analysis,
+        }),
+        _ => None,
+    }
+}
+
+fn write_report_output<W: Write>(writer: &mut W, output: &str) -> Result<()> {
+    writer
+        .write_all(output.as_bytes())
+        .map_err(|error| CodeM8Error::new(format!("could not write report output: {error}")))
 }
 
 fn time_result<T>(
@@ -123,6 +225,21 @@ fn filtered_processed_files(
         .filter(|processed_file| {
             selected_files.contains(&format_path(&processed_file.source.display_path))
         })
+        .cloned()
+        .collect()
+}
+
+fn filtered_source_files(
+    source_files: &[SourceFile],
+    selected_files: &[std::path::PathBuf],
+) -> Vec<SourceFile> {
+    let selected_files = selected_files
+        .iter()
+        .map(|path| format_path(path))
+        .collect::<HashSet<_>>();
+    source_files
+        .iter()
+        .filter(|source_file| selected_files.contains(&format_path(&source_file.display_path)))
         .cloned()
         .collect()
 }
@@ -376,6 +493,90 @@ mod tests {
             run_in(&project, &["--report-duplicate", "-git-branch"]).expect("report succeeds");
         assert!(output.contains("Number of files analyzed: 1"));
         assert!(output.contains("Duplicate blocks found: 0"));
+    }
+
+    #[test]
+    fn complexity_report_lists_functions_over_limits() {
+        let project = TempProject::new("complexity");
+        project.write(
+            "src/lib.rs",
+            "fn risky(value: i32) -> i32 {\n\
+             if value > 10 {\n\
+             return 10;\n\
+             }\n\
+             if value > 5 {\n\
+             return 5;\n\
+             }\n\
+             0\n\
+             }\n",
+        );
+        let output = run_in(
+            &project,
+            [
+                "--report-complexity",
+                "-file-extension=rs",
+                "-max-cognitive-complexity=1",
+                "-max-cyclomatic-complexity=1",
+            ]
+            .as_slice(),
+        )
+        .expect("report succeeds");
+        assert!(output.contains("Complexity Report"));
+        assert!(output.contains("Number of files analyzed: 1"));
+        assert!(output.contains("Functions exceeding limits: 1"));
+        assert!(output.contains("Function: risky"));
+        assert!(output.contains("Location: src/lib.rs:1-9"));
+        assert!(output.contains("Cognitive complexity:"));
+        assert!(output.contains("Cyclomatic complexity:"));
+    }
+
+    #[test]
+    fn complexity_report_skips_unsupported_extensions() {
+        let project = TempProject::new("complexity-unsupported");
+        project.write("src/lib.rb", "def risky\nend\n");
+        let output = run_in(&project, &["--report-complexity"]).expect("report succeeds");
+        assert!(output.contains("Number of files analyzed: 0"));
+        assert!(output.contains("Functions exceeding limits: 0"));
+    }
+
+    #[test]
+    fn git_branch_mode_limits_complexity_search_to_changed_files() {
+        if !git_is_available() {
+            return;
+        }
+        let project = TempGitRepo::new("complexity-git-branch-scope");
+        project.git(&["init"]);
+        project.write(
+            "src/unchanged.rs",
+            "fn risky(value: i32) -> i32 {\n\
+             if value > 10 {\n\
+             return 10;\n\
+             }\n\
+             if value > 5 {\n\
+             return 5;\n\
+             }\n\
+             0\n\
+             }\n",
+        );
+        project.write("src/changed.rs", "fn simple() -> i32 {\n1\n}\n");
+        project.commit("initial");
+        project.git(&["update-ref", "refs/remotes/origin/main", "HEAD"]);
+        project.git(&["branch", "-M", "feature"]);
+        project.write("src/changed.rs", "fn simple() -> i32 {\n2\n}\n");
+        let output = run_in(
+            &project,
+            [
+                "--report-complexity",
+                "-git-branch",
+                "-file-extension=rs",
+                "-max-cognitive-complexity=1",
+                "-max-cyclomatic-complexity=1",
+            ]
+            .as_slice(),
+        )
+        .expect("report succeeds");
+        assert!(output.contains("Number of files analyzed: 1"));
+        assert!(output.contains("Functions exceeding limits: 0"));
     }
 
     #[test]
