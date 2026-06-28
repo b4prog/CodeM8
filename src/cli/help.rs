@@ -39,8 +39,7 @@ OPTIONS:
       branch. Cannot be combined with -files.
 
   -git-branch-strict
-      Search only in files changed on the current local Git branch, and report
-      only duplicate blocks or complex functions that overlap changed lines.
+      Limit the report to lines changed on the current git branch.
       Cannot be combined with -files or -git-branch.
 
   -max-cognitive-complexity=<value>
