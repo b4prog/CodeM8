@@ -14,9 +14,13 @@ fn main() -> ExitCode {
     let stdout = std::io::stdout();
     let mut stdout = stdout.lock();
     match codem8::run(std::env::args().skip(1), &current_dir, &mut stdout) {
-        Ok(()) => {
+        Ok(status) => {
             let _ = stdout.flush();
-            ExitCode::SUCCESS
+            if status.is_success() {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            }
         }
         Err(error) => {
             eprintln!("error: {error}");

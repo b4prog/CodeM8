@@ -81,6 +81,10 @@ codem8 --report-duplicate -git-branch
 The duplicate and complexity reports are mutually exclusive; run one report per
 command.
 
+Reports exit with a non-zero status when they detect issues: duplicate blocks
+for `--report-duplicate`, or functions above the configured limits for
+`--report-complexity`.
+
 Include duplicate block metrics and timing information:
 
 ```bash

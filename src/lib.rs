@@ -19,26 +19,50 @@ use crate::model::ProcessedFile;
 use crate::model::SourceFile;
 use crate::paths::format_path;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunStatus {
+    Success,
+    IssuesFound,
+}
+
+impl RunStatus {
+    const fn from_issue_count(issue_count: usize) -> Self {
+        if issue_count == 0 {
+            Self::Success
+        } else {
+            Self::IssuesFound
+        }
+    }
+
+    #[must_use]
+    pub const fn is_success(self) -> bool {
+        matches!(self, Self::Success)
+    }
+}
+
 /// Runs the CLI workflow and writes the selected report to the provided writer.
 ///
 /// # Errors
 ///
 /// Returns an error when argument parsing, file discovery, file processing, or
 /// report writing fails.
-pub fn run<I, S, W>(args: I, current_dir: &Path, writer: &mut W) -> Result<()>
+pub fn run<I, S, W>(args: I, current_dir: &Path, writer: &mut W) -> Result<RunStatus>
 where
     I: IntoIterator<Item = S>,
     S: Into<String>,
     W: Write,
 {
-    match cli::parse_command(args)? {
-        cli::CliCommand::Help => write_help(writer)?,
+    let status = match cli::parse_command(args)? {
+        cli::CliCommand::Help => {
+            write_help(writer)?;
+            RunStatus::Success
+        }
         cli::CliCommand::Report(config) => match config.report {
             cli::ReportKind::Duplicate => run_duplicate_report(&config, current_dir, writer)?,
             cli::ReportKind::Complexity => run_complexity_report(&config, current_dir, writer)?,
         },
-    }
-    Ok(())
+    };
+    Ok(status)
 }
 
 fn write_help<W: Write>(writer: &mut W) -> Result<()> {
@@ -51,7 +75,7 @@ fn run_duplicate_report<W: Write>(
     config: &cli::CliConfig,
     current_dir: &Path,
     writer: &mut W,
-) -> Result<()> {
+) -> Result<RunStatus> {
     let should_report_analyzed_files = config.git_branch || config.files.is_some();
     let git_branch_files = changed_git_branch_files(config, current_dir)?;
     let (source_files, discovery_duration) = discover_report_files(
@@ -87,14 +111,16 @@ fn run_duplicate_report<W: Write>(
         duplicate_blocks,
     };
     let output = report::render_duplicate_report(&report, config.verbose);
-    write_report_output(writer, &output)
+    let status = RunStatus::from_issue_count(report.duplicate_blocks.len());
+    write_report_output(writer, &output)?;
+    Ok(status)
 }
 
 fn run_complexity_report<W: Write>(
     config: &cli::CliConfig,
     current_dir: &Path,
     writer: &mut W,
-) -> Result<()> {
+) -> Result<RunStatus> {
     let should_report_analyzed_files = config.git_branch || config.files.is_some();
     let git_branch_files = changed_git_branch_files(config, current_dir)?;
     let analyzed_extensions = report::complexity_supported_file_extensions(&config.file_extensions);
@@ -131,7 +157,9 @@ fn run_complexity_report<W: Write>(
         functions,
     };
     let output = report::render_complexity_report(&report, config.verbose);
-    write_report_output(writer, &output)
+    let status = RunStatus::from_issue_count(report.functions.len());
+    write_report_output(writer, &output)?;
+    Ok(status)
 }
 
 fn changed_git_branch_files(
@@ -356,9 +384,16 @@ mod tests {
         project: P,
         args: &[&str],
     ) -> std::result::Result<String, CodeM8Error> {
+        run_with_status(project, args).map(|(output, _status)| output)
+    }
+
+    fn run_with_status<P: AsRef<Path>>(
+        project: P,
+        args: &[&str],
+    ) -> std::result::Result<(String, RunStatus), CodeM8Error> {
         let mut output = Vec::new();
-        run(args.iter().copied(), project.as_ref(), &mut output)?;
-        Ok(String::from_utf8(output).expect("report is UTF-8"))
+        let status = run(args.iter().copied(), project.as_ref(), &mut output)?;
+        Ok((String::from_utf8(output).expect("report is UTF-8"), status))
     }
 
     fn git_is_available() -> bool {
@@ -404,6 +439,16 @@ mod tests {
     }
 
     #[test]
+    fn duplicate_report_status_fails_when_duplicates_are_found() {
+        let project = TempProject::new("duplicate-status");
+        project.write("src/a.ts", "const value = one;\n");
+        project.write("src/b.ts", "const value = one;\n");
+        let (_output, status) =
+            run_with_status(&project, &["--report-duplicate"]).expect("report succeeds");
+        assert_eq!(status, RunStatus::IssuesFound);
+    }
+
+    #[test]
     fn verbose_duplicate_report_includes_metrics_without_characters() {
         let project = TempProject::new("verbose");
         project.write(
@@ -439,6 +484,16 @@ mod tests {
             run_in(&project, &["--report-duplicate", "-files=src/a.ts"]).expect("report succeeds");
         assert!(output.contains("Number of files analyzed: 1"));
         assert!(output.contains("Duplicate blocks found: 0"));
+    }
+
+    #[test]
+    fn duplicate_report_status_succeeds_when_no_duplicates_are_found() {
+        let project = TempProject::new("duplicate-clean-status");
+        project.write("src/a.ts", "const first = one;\n");
+        project.write("src/b.ts", "const second = two;\n");
+        let (_output, status) =
+            run_with_status(&project, &["--report-duplicate"]).expect("report succeeds");
+        assert_eq!(status, RunStatus::Success);
     }
 
     #[test]
@@ -531,12 +586,47 @@ mod tests {
     }
 
     #[test]
+    fn complexity_report_status_fails_when_complex_functions_are_found() {
+        let project = TempProject::new("complexity-status");
+        project.write(
+            "src/lib.rs",
+            "fn risky(value: i32) -> i32 {\n\
+             if value > 10 {\n\
+             return 10;\n\
+             }\n\
+             if value > 5 {\n\
+             return 5;\n\
+             }\n\
+             0\n\
+             }\n",
+        );
+        let (_output, status) = run_with_status(
+            &project,
+            &[
+                "--report-complexity",
+                "-file-extension=rs",
+                "-max-cognitive-complexity=1",
+                "-max-cyclomatic-complexity=1",
+            ],
+        )
+        .expect("report succeeds");
+        assert_eq!(status, RunStatus::IssuesFound);
+    }
+
+    #[test]
     fn complexity_report_skips_unsupported_extensions() {
         let project = TempProject::new("complexity-unsupported");
         project.write("src/lib.rb", "def risky\nend\n");
         let output = run_in(&project, &["--report-complexity"]).expect("report succeeds");
         assert!(output.contains("Number of files analyzed: 0"));
         assert!(output.contains("Functions exceeding limits: 0"));
+    }
+
+    #[test]
+    fn help_status_succeeds() {
+        let project = TempProject::new("help-status");
+        let (_output, status) = run_with_status(&project, &["help"]).expect("help succeeds");
+        assert_eq!(status, RunStatus::Success);
     }
 
     #[test]
