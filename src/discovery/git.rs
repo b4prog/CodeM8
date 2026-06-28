@@ -86,30 +86,6 @@ pub fn changed_lines_against_origin(current_dir: &Path) -> Result<Vec<ChangedFil
             "--no-color",
             "--diff-filter=ACMRTUXB",
             merge_base.trim(),
-            "HEAD",
-        ],
-        &mut changed_files,
-    )?;
-    extend_changed_lines(
-        &repo_root,
-        current_dir,
-        &[
-            "diff",
-            "--unified=0",
-            "--no-color",
-            "--cached",
-            "--diff-filter=ACMRTUXB",
-        ],
-        &mut changed_files,
-    )?;
-    extend_changed_lines(
-        &repo_root,
-        current_dir,
-        &[
-            "diff",
-            "--unified=0",
-            "--no-color",
-            "--diff-filter=ACMRTUXB",
         ],
         &mut changed_files,
     )?;
@@ -464,6 +440,44 @@ mod tests {
                 PathBuf::from("src/staged.ts"),
                 PathBuf::from("src/untracked.ts"),
             ]
+        );
+    }
+
+    #[test]
+    fn reports_changed_lines_in_worktree_coordinates() {
+        if !git_is_available() {
+            return;
+        }
+        let repo = TempGitRepo::new("changed-lines");
+        repo.git(&["init"]);
+        repo.write("src/example.ts", "base-1\nbase-2\nbase-3\nbase-4\nbase-5\n");
+        repo.commit("initial");
+        repo.git(&["update-ref", "refs/remotes/origin/main", "HEAD"]);
+        repo.git(&["branch", "-M", "feature"]);
+        repo.write(
+            "src/example.ts",
+            "base-1\nbase-2\nbase-3\nbase-4\nbranch-5\n",
+        );
+        repo.commit("branch change");
+        repo.write(
+            "src/example.ts",
+            "staged-0\nbase-1\nbase-2\nbase-3\nbase-4\nbranch-5\n",
+        );
+        repo.git(&["add", "src/example.ts"]);
+        repo.write(
+            "src/example.ts",
+            "worktree-0\nstaged-0\nbase-1\nbase-2\nbase-3\nbase-4\nbranch-5\n",
+        );
+        let files = changed_lines_against_origin(repo.path()).expect("list changed lines");
+        assert_eq!(
+            files,
+            [ChangedFileLines {
+                path: PathBuf::from("src/example.ts"),
+                lines: vec![
+                    LineRange { start: 1, end: 2 },
+                    LineRange { start: 7, end: 7 },
+                ],
+            }]
         );
     }
 }
