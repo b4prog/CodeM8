@@ -31,7 +31,7 @@ OPTIONS:
   -files=<paths>
       Comma-separated explicit files to analyze instead of recursively
       discovering files from the current directory.
-      Example: -files=src/a.ts,src/b.js
+      Example: -files=\"src/a.ts,src/b.js\"
 
   -git-branch
       Search only in files changed on the current local Git
@@ -62,7 +62,7 @@ COMPLEXITY REPORT PURPOSE:
 EXAMPLES:
   codem8 --report-duplicate
   codem8 --report-duplicate -file-extension=ts,tsx,js,jsx
-  codem8 --report-duplicate -file-extension=ts,js -files=src/a.ts,src/b.js
+  codem8 --report-duplicate -file-extension=ts,js -files=\"src/a.ts,src/b.js\"
   codem8 --report-duplicate -git-branch
   codem8 --report-complexity -file-extension=rs -max-cognitive-complexity=12
 ";

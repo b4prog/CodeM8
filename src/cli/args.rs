@@ -230,10 +230,29 @@ where
     S: Into<String>,
 {
     let mut normalized = vec!["codem8".to_owned()];
-    for arg in args {
-        normalized.push(normalized_clap_arg(arg.into())?);
+    for arg in join_split_file_extensions(args.into_iter().map(Into::into)) {
+        normalized.push(normalized_clap_arg(arg)?);
     }
     Ok(normalized)
+}
+
+fn join_split_file_extensions(args: impl IntoIterator<Item = String>) -> Vec<String> {
+    let mut joined = Vec::new();
+    for arg in args {
+        if should_join_split_extension(joined.last(), &arg) {
+            let previous = joined
+                .last_mut()
+                .expect("previous file argument exists when extension joins");
+            previous.push_str(&arg);
+        } else {
+            joined.push(arg);
+        }
+    }
+    joined
+}
+
+fn should_join_split_extension(previous: Option<&String>, arg: &str) -> bool {
+    previous.is_some_and(|previous| previous.starts_with("-files=") && arg.starts_with('.'))
 }
 
 fn normalized_clap_arg(arg: String) -> Result<String> {
@@ -457,6 +476,31 @@ mod tests {
         assert_eq!(
             files,
             [PathBuf::from("src/a.ts"), PathBuf::from("./src/b.ts")]
+        );
+    }
+
+    #[test]
+    fn rejoins_powershell_split_file_extensions() {
+        let config =
+            parse_args(["--report-complexity", "-files=src/main", ".rs"]).expect("config parses");
+        assert_eq!(config.files, Some(vec![PathBuf::from("src/main.rs")]));
+    }
+
+    #[test]
+    fn rejoins_multiple_powershell_split_file_extensions() {
+        let config = parse_args([
+            "--report-complexity",
+            "-files=src/main",
+            ".rs,src/lib",
+            ".rs",
+        ])
+        .expect("config parses");
+        assert_eq!(
+            config.files,
+            Some(vec![
+                PathBuf::from("src/main.rs"),
+                PathBuf::from("src/lib.rs")
+            ])
         );
     }
 

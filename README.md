@@ -68,8 +68,11 @@ codem8 --report-duplicate -file-extension=ts,tsx,js,jsx
 Analyze an explicit list of files instead of recursively discovering files:
 
 ```bash
-codem8 --report-duplicate -file-extension=ts,js -files=src/a.ts,src/b.js
+codem8 --report-duplicate -file-extension=ts,js -files="src/a.ts,src/b.js"
 ```
+
+Quoting `-files` values is recommended in PowerShell when paths contain file
+extensions.
 
 Analyze files changed on the current local Git branch compared to the origin
 base branch:
