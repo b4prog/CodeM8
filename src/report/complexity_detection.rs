@@ -158,7 +158,31 @@ mod tests {
 
     #[test]
     fn detects_functions_over_either_limit() {
-        let file = source_file(
+        let cognitive_only_file = source_file(
+            "rs",
+            "fn nested(value: i32) -> i32 {\n\
+             if value > 10 {\n\
+             if value > 20 {\n\
+             return 20;\n\
+             }\n\
+             return 10;\n\
+             }\n\
+             0\n\
+             }\n",
+        );
+        let cognitive_only_functions =
+            detect_complex_functions(std::slice::from_ref(&cognitive_only_file), 2, 3)
+                .expect("detect");
+        assert_eq!(cognitive_only_functions.len(), 1);
+        assert_eq!(
+            cognitive_only_functions[0].file_path,
+            PathBuf::from("sample.rs")
+        );
+        assert!(cognitive_only_functions[0].function_name.contains("nested"));
+        assert!(cognitive_only_functions[0].cognitive_complexity > 2.0);
+        assert!(cognitive_only_functions[0].cyclomatic_complexity <= 3.0);
+        fs::remove_file(cognitive_only_file.path).expect("cleanup");
+        let cyclomatic_only_file = source_file(
             "rs",
             "fn risky(value: i32) -> i32 {\n\
              if value > 10 {\n\
@@ -170,13 +194,17 @@ mod tests {
              0\n\
              }\n",
         );
-        let functions =
-            detect_complex_functions(std::slice::from_ref(&file), 1, 1).expect("detect");
-        assert_eq!(functions.len(), 1);
-        assert_eq!(functions[0].file_path, PathBuf::from("sample.rs"));
-        assert!(functions[0].function_name.contains("risky"));
-        assert!(functions[0].cognitive_complexity > 1.0);
-        assert!(functions[0].cyclomatic_complexity > 1.0);
-        fs::remove_file(file.path).expect("cleanup");
+        let cyclomatic_only_functions =
+            detect_complex_functions(std::slice::from_ref(&cyclomatic_only_file), 2, 2)
+                .expect("detect");
+        assert_eq!(cyclomatic_only_functions.len(), 1);
+        assert_eq!(
+            cyclomatic_only_functions[0].file_path,
+            PathBuf::from("sample.rs")
+        );
+        assert!(cyclomatic_only_functions[0].function_name.contains("risky"));
+        assert!(cyclomatic_only_functions[0].cognitive_complexity <= 2.0);
+        assert!(cyclomatic_only_functions[0].cyclomatic_complexity > 2.0);
+        fs::remove_file(cyclomatic_only_file.path).expect("cleanup");
     }
 }
