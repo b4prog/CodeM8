@@ -2,15 +2,20 @@ use std::path::PathBuf;
 
 use clap::{ArgAction, Parser};
 
-use super::CliConfig;
+use super::{CliConfig, ReportKind};
 use crate::error::{CodeM8Error, Result};
 use crate::language::supported_file_extensions;
+
+pub const DEFAULT_MAX_COGNITIVE_COMPLEXITY: u32 = 15;
+pub const DEFAULT_MAX_CYCLOMATIC_COMPLEXITY: u32 = 10;
 
 #[derive(Debug, Parser)]
 #[command(name = "codem8", disable_help_flag = true, disable_version_flag = true)]
 struct ClapCli {
     #[arg(long = "report-duplicate", action = ArgAction::Count)]
     report_duplicate: u8,
+    #[arg(long = "report-complexity", action = ArgAction::Count)]
+    report_complexity: u8,
     #[arg(long = "codem8-verbose", action = ArgAction::Count)]
     verbose: u8,
     #[arg(long = "codem8-git-branch", action = ArgAction::Count)]
@@ -29,6 +34,16 @@ struct ClapCli {
         action = ArgAction::Append
     )]
     files: Vec<Vec<PathBuf>>,
+    #[arg(
+        long = "codem8-max-cognitive-complexity",
+        value_parser = parse_complexity_limit
+    )]
+    max_cognitive_complexity: Option<u32>,
+    #[arg(
+        long = "codem8-max-cyclomatic-complexity",
+        value_parser = parse_complexity_limit
+    )]
+    max_cyclomatic_complexity: Option<u32>,
 }
 
 /// Parses command-line arguments into a validated CLI configuration.
@@ -44,16 +59,51 @@ where
 {
     let parsed = ClapCli::try_parse_from(normalized_clap_args(args)?)
         .map_err(|error| CodeM8Error::new(error.to_string().trim().to_owned()))?;
-    if parsed.report_duplicate == 0 {
+    let report = selected_report(&parsed)?;
+    validate_repeated_options(&parsed)?;
+    let git_branch = parsed.git_branch != 0;
+    let files = selected_files(&parsed, git_branch)?;
+    validate_complexity_limits(report, &parsed)?;
+    Ok(CliConfig {
+        report,
+        verbose: parsed.verbose != 0,
+        file_extensions: selected_file_extensions(&parsed),
+        files,
+        git_branch,
+        max_cognitive_complexity: parsed
+            .max_cognitive_complexity
+            .unwrap_or(DEFAULT_MAX_COGNITIVE_COMPLEXITY),
+        max_cyclomatic_complexity: parsed
+            .max_cyclomatic_complexity
+            .unwrap_or(DEFAULT_MAX_CYCLOMATIC_COMPLEXITY),
+    })
+}
+
+fn selected_report(parsed: &ClapCli) -> Result<ReportKind> {
+    let report_count = parsed.report_duplicate + parsed.report_complexity;
+    if report_count == 0 {
         return Err(CodeM8Error::with_help(
-            "no report switch provided; pass --report-duplicate",
+            "no report switch provided; pass --report-duplicate or --report-complexity",
         ));
     }
-    if parsed.report_duplicate > 1 {
+    if parsed.report_duplicate > 1 || parsed.report_complexity > 1 {
         return Err(CodeM8Error::new(
             "report switch was provided more than once",
         ));
     }
+    if report_count > 1 {
+        return Err(CodeM8Error::new(
+            "--report-duplicate and --report-complexity are mutually exclusive",
+        ));
+    }
+    Ok(if parsed.report_duplicate != 0 {
+        ReportKind::Duplicate
+    } else {
+        ReportKind::Complexity
+    })
+}
+
+fn validate_repeated_options(parsed: &ClapCli) -> Result<()> {
     if parsed.git_branch > 1 {
         return Err(CodeM8Error::new(
             "git branch mode was provided more than once",
@@ -69,24 +119,36 @@ where
             "explicit files were provided more than once",
         ));
     }
-    let git_branch = parsed.git_branch != 0;
-    let files = parsed.files.into_iter().next();
+    Ok(())
+}
+
+fn selected_files(parsed: &ClapCli, git_branch: bool) -> Result<Option<Vec<PathBuf>>> {
+    let files = parsed.files.first().cloned();
     if git_branch && files.is_some() {
         return Err(CodeM8Error::new(
             "git branch mode cannot be combined with explicit files",
         ));
     }
-    Ok(CliConfig {
-        report_duplicate: parsed.report_duplicate != 0,
-        verbose: parsed.verbose != 0,
-        file_extensions: parsed
-            .file_extensions
-            .into_iter()
-            .next()
-            .unwrap_or_else(supported_file_extensions),
-        files,
-        git_branch,
-    })
+    Ok(files)
+}
+
+fn validate_complexity_limits(report: ReportKind, parsed: &ClapCli) -> Result<()> {
+    if report == ReportKind::Duplicate
+        && (parsed.max_cognitive_complexity.is_some() || parsed.max_cyclomatic_complexity.is_some())
+    {
+        return Err(CodeM8Error::new(
+            "complexity limits can only be used with --report-complexity",
+        ));
+    }
+    Ok(())
+}
+
+fn selected_file_extensions(parsed: &ClapCli) -> Vec<String> {
+    parsed
+        .file_extensions
+        .first()
+        .cloned()
+        .unwrap_or_else(supported_file_extensions)
 }
 
 /// Parses a comma-separated list of file extensions.
@@ -143,16 +205,54 @@ pub fn parse_file_list(value: &str) -> Result<Vec<PathBuf>> {
     Ok(files)
 }
 
+/// Parses a positive complexity limit.
+///
+/// # Errors
+///
+/// Returns an error when the value is not a positive integer.
+pub fn parse_complexity_limit(value: &str) -> Result<u32> {
+    let limit = value.parse::<u32>().map_err(|_| {
+        CodeM8Error::new(format!(
+            "complexity limits must be positive integers: {value}"
+        ))
+    })?;
+    if limit == 0 {
+        return Err(CodeM8Error::new(
+            "complexity limits must be greater than zero",
+        ));
+    }
+    Ok(limit)
+}
+
 fn normalized_clap_args<I, S>(args: I) -> Result<Vec<String>>
 where
     I: IntoIterator<Item = S>,
     S: Into<String>,
 {
     let mut normalized = vec!["codem8".to_owned()];
-    for arg in args {
-        normalized.push(normalized_clap_arg(arg.into())?);
+    for arg in join_split_file_extensions(args.into_iter().map(Into::into)) {
+        normalized.push(normalized_clap_arg(arg)?);
     }
     Ok(normalized)
+}
+
+fn join_split_file_extensions(args: impl IntoIterator<Item = String>) -> Vec<String> {
+    let mut joined = Vec::new();
+    for arg in args {
+        if should_join_split_extension(joined.last(), &arg) {
+            let previous = joined
+                .last_mut()
+                .expect("previous file argument exists when extension joins");
+            previous.push_str(&arg);
+        } else {
+            joined.push(arg);
+        }
+    }
+    joined
+}
+
+fn should_join_split_extension(previous: Option<&String>, arg: &str) -> bool {
+    previous.is_some_and(|previous| previous.starts_with("-files=") && arg.starts_with('.'))
 }
 
 fn normalized_clap_arg(arg: String) -> Result<String> {
@@ -164,7 +264,13 @@ fn normalized_clap_arg(arg: String) -> Result<String> {
         Ok(format!("--codem8-file-extension={value}"))
     } else if let Some(value) = arg.strip_prefix("-files=") {
         Ok(format!("--codem8-files={value}"))
-    } else if arg.starts_with("--") && arg != "--report-duplicate" {
+    } else if let Some(value) = arg.strip_prefix("-max-cognitive-complexity=") {
+        Ok(format!("--codem8-max-cognitive-complexity={value}"))
+    } else if let Some(value) = arg.strip_prefix("-max-cyclomatic-complexity=") {
+        Ok(format!("--codem8-max-cyclomatic-complexity={value}"))
+    } else if arg.starts_with("--")
+        && !matches!(arg.as_str(), "--report-duplicate" | "--report-complexity")
+    {
         Err(CodeM8Error::new(format!("unknown argument: {arg}")))
     } else {
         Ok(arg)
@@ -178,17 +284,51 @@ mod tests {
     #[test]
     fn parses_default_duplicate_report_config() {
         let config = parse_args(["--report-duplicate"]).expect("config parses");
-        assert!(config.report_duplicate);
+        assert_eq!(config.report, ReportKind::Duplicate);
         assert!(!config.verbose);
         assert_eq!(config.file_extensions, supported_file_extensions());
         assert_eq!(config.files, None);
         assert!(!config.git_branch);
+        assert_eq!(
+            config.max_cognitive_complexity,
+            DEFAULT_MAX_COGNITIVE_COMPLEXITY
+        );
+        assert_eq!(
+            config.max_cyclomatic_complexity,
+            DEFAULT_MAX_CYCLOMATIC_COMPLEXITY
+        );
+    }
+
+    #[test]
+    fn parses_default_complexity_report_config() {
+        let config = parse_args(["--report-complexity"]).expect("config parses");
+        assert_eq!(config.report, ReportKind::Complexity);
+        assert_eq!(
+            config.max_cognitive_complexity,
+            DEFAULT_MAX_COGNITIVE_COMPLEXITY
+        );
+        assert_eq!(
+            config.max_cyclomatic_complexity,
+            DEFAULT_MAX_CYCLOMATIC_COMPLEXITY
+        );
+    }
+
+    #[test]
+    fn parses_custom_complexity_limits() {
+        let config = parse_args([
+            "--report-complexity",
+            "-max-cognitive-complexity=20",
+            "-max-cyclomatic-complexity=12",
+        ])
+        .expect("config parses");
+        assert_eq!(config.max_cognitive_complexity, 20);
+        assert_eq!(config.max_cyclomatic_complexity, 12);
     }
 
     #[test]
     fn parses_verbose_duplicate_report_config() {
         let config = parse_args(["--report-duplicate", "-verbose"]).expect("config parses");
-        assert!(config.report_duplicate);
+        assert_eq!(config.report, ReportKind::Duplicate);
         assert!(config.verbose);
     }
 
@@ -247,6 +387,8 @@ mod tests {
             "--file-extension=js",
             "--files=src/a.ts",
             "--git-branch",
+            "--max-cognitive-complexity=20",
+            "--max-cyclomatic-complexity=12",
         ] {
             let error =
                 parse_args(["--report-duplicate", option]).expect_err("double-dash option fails");
@@ -276,6 +418,29 @@ mod tests {
         assert!(error
             .to_string()
             .contains("report switch was provided more than once"));
+    }
+
+    #[test]
+    fn rejects_multiple_report_kinds() {
+        let error = parse_args(["--report-duplicate", "--report-complexity"])
+            .expect_err("exclusive reports fail");
+        assert!(error.to_string().contains("mutually exclusive"));
+    }
+
+    #[test]
+    fn rejects_zero_complexity_limits() {
+        let error = parse_args(["--report-complexity", "-max-cognitive-complexity=0"])
+            .expect_err("zero limit fails");
+        assert!(error.to_string().contains("greater than zero"));
+    }
+
+    #[test]
+    fn rejects_complexity_limits_with_duplicate_report() {
+        let error = parse_args(["--report-duplicate", "-max-cognitive-complexity=15"])
+            .expect_err("duplicate report complexity limit fails");
+        assert!(error
+            .to_string()
+            .contains("can only be used with --report-complexity"));
     }
 
     #[test]
@@ -311,6 +476,31 @@ mod tests {
         assert_eq!(
             files,
             [PathBuf::from("src/a.ts"), PathBuf::from("./src/b.ts")]
+        );
+    }
+
+    #[test]
+    fn rejoins_powershell_split_file_extensions() {
+        let config =
+            parse_args(["--report-complexity", "-files=src/main", ".rs"]).expect("config parses");
+        assert_eq!(config.files, Some(vec![PathBuf::from("src/main.rs")]));
+    }
+
+    #[test]
+    fn rejoins_multiple_powershell_split_file_extensions() {
+        let config = parse_args([
+            "--report-complexity",
+            "-files=src/main",
+            ".rs,src/lib",
+            ".rs",
+        ])
+        .expect("config parses");
+        assert_eq!(
+            config.files,
+            Some(vec![
+                PathBuf::from("src/main.rs"),
+                PathBuf::from("src/lib.rs")
+            ])
         );
     }
 

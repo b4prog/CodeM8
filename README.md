@@ -1,7 +1,7 @@
 # CodeM8
 
 CodeM8 is a Rust command-line application for deterministic source code reports.
-The initial report detects duplicated line-based code blocks in a repository:
+It can detect duplicated line-based code blocks in a repository:
 
 ```bash
 codem8 --report-duplicate
@@ -11,6 +11,13 @@ The duplicate report is designed for both human developers and coding agents. It
 trims source lines, ignores empty lines, hashes normalized lines with XXH3
 128-bit, classifies syntax-only lines as block-only, groups repeated blocks, and
 prints a stable plain-text report sorted by duplicate weight.
+
+CodeM8 can also report functions whose cognitive or cyclomatic complexity
+exceeds configurable limits:
+
+```bash
+codem8 --report-complexity
+```
 
 ## Installation
 
@@ -29,7 +36,7 @@ cargo build --release
 Install from a local checkout:
 
 ```bash
-cargo install --path .
+cargo install --locked --path .
 ```
 
 Run from the local checkout without installing:
@@ -46,6 +53,12 @@ Analyze supported source files from the current directory:
 codem8 --report-duplicate
 ```
 
+Analyze function complexity for languages supported by `rust-code-analysis`:
+
+```bash
+codem8 --report-complexity
+```
+
 Restrict analysis to specific extensions:
 
 ```bash
@@ -55,8 +68,11 @@ codem8 --report-duplicate -file-extension=ts,tsx,js,jsx
 Analyze an explicit list of files instead of recursively discovering files:
 
 ```bash
-codem8 --report-duplicate -file-extension=ts,js -files=src/a.ts,src/b.js
+codem8 --report-duplicate -file-extension=ts,js -files="src/a.ts,src/b.js"
 ```
+
+Quoting `-files` values is recommended in PowerShell when paths contain file
+extensions.
 
 Analyze files changed on the current local Git branch compared to the origin
 base branch:
@@ -65,10 +81,23 @@ base branch:
 codem8 --report-duplicate -git-branch
 ```
 
-Include duplicate block metrics and timing information:
+The duplicate and complexity reports are mutually exclusive; run one report per
+command.
+
+Reports exit with a non-zero status when they detect issues: duplicate blocks
+for `--report-duplicate`, or functions above the configured limits for
+`--report-complexity`.
+
+Include analyzed files, report metrics, and timing information:
 
 ```bash
 codem8 --report-duplicate -verbose
+```
+
+Set complexity thresholds:
+
+```bash
+codem8 --report-complexity -max-cognitive-complexity=15 -max-cyclomatic-complexity=10
 ```
 
 ## Duplicate Report
@@ -99,10 +128,27 @@ Reports are sorted deterministically by descending weight, then by line count,
 character count, first location, and normalized block text.
 
 By default, each duplicate block prints only the duplicate locations. Use
-`-verbose` to also show the duplicated code, weight, line count, occurrence
-count, and timings for discovery, file processing, and duplicate detection.
-Character counts are used internally for scoring and sorting, but are not
-printed.
+`-verbose` to also show analyzed files, the duplicated code, weight, line count,
+occurrence count, and timings for discovery, file processing, and duplicate
+detection. Character counts are used internally for scoring and sorting, but are
+not printed.
+
+## Complexity Report
+
+The complexity report uses `rust-code-analysis` and only applies to file
+extensions supported by that crate. It reports `SpaceKind::Function` entries
+whose cognitive complexity exceeds the configured cognitive limit or whose
+cyclomatic complexity exceeds the configured cyclomatic limit.
+
+The default maximum cognitive complexity is 15, and the default maximum
+cyclomatic complexity is 10. Use `-max-cognitive-complexity=<value>` and
+`-max-cyclomatic-complexity=<value>` to adjust them.
+
+Use `-git-branch` to analyze complexity only in supported files changed on the
+current local branch. The same origin branch resolution and `-files` exclusion
+rules used by the duplicate report apply.
+
+Use `-verbose` to list analyzed files and timing information.
 
 ## Development
 
