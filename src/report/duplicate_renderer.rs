@@ -45,11 +45,9 @@ fn render_report_summary(output: &mut String, report: &DuplicateReport, verbose:
         output.push_str("Files analyzed:\n");
         render_analyzed_files(output, analyzed_file_paths);
     }
-    let _ = writeln!(
-        output,
-        "Analyzed extensions: {}",
-        sorted_extensions(&report.analyzed_extensions).join(", ")
-    );
+    if verbose {
+        render_verbose_summary(output, report);
+    }
     let _ = writeln!(
         output,
         "Duplicate blocks found: {}",
@@ -58,6 +56,14 @@ fn render_report_summary(output: &mut String, report: &DuplicateReport, verbose:
     if verbose {
         render_timings(output, report.timings);
     }
+}
+
+fn render_verbose_summary(output: &mut String, report: &DuplicateReport) {
+    let _ = writeln!(
+        output,
+        "Analyzed extensions: {}",
+        sorted_extensions(&report.analyzed_extensions).join(", ")
+    );
 }
 
 fn render_analyzed_files(output: &mut String, analyzed_file_paths: &[AnalyzedFile]) {
@@ -190,7 +196,6 @@ mod tests {
              =====================\n\
              \n\
              Number of files analyzed: 0\n\
-             Analyzed extensions: ts\n\
              Duplicate blocks found: 0\n"
         );
     }
@@ -242,7 +247,9 @@ mod tests {
             duplicate_blocks: Vec::new(),
         };
         let output = render_duplicate_report(&report, false);
-        assert!(output.contains("Analyzed extensions: js, rs, ts\n"));
+        assert!(!output.contains("Analyzed extensions:"));
+        let verbose_output = render_duplicate_report(&report, true);
+        assert!(verbose_output.contains("Analyzed extensions: js, rs, ts\n"));
     }
 
     #[test]

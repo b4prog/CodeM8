@@ -33,22 +33,8 @@ pub fn render_complexity_report(report: &ComplexityReport, verbose: bool) -> Str
     );
     if verbose {
         render_analyzed_files(&mut output, report.analyzed_file_paths.as_deref());
+        render_verbose_summary(&mut output, report);
     }
-    let _ = writeln!(
-        output,
-        "Analyzed extensions: {}",
-        sorted_extensions(&report.analyzed_extensions).join(", ")
-    );
-    let _ = writeln!(
-        output,
-        "Max cognitive complexity: {}",
-        report.max_cognitive_complexity
-    );
-    let _ = writeln!(
-        output,
-        "Max cyclomatic complexity: {}",
-        report.max_cyclomatic_complexity
-    );
     let _ = writeln!(
         output,
         "Functions exceeding limits: {}",
@@ -80,6 +66,24 @@ pub fn render_complexity_report(report: &ComplexityReport, verbose: bool) -> Str
         );
     }
     output
+}
+
+fn render_verbose_summary(output: &mut String, report: &ComplexityReport) {
+    let _ = writeln!(
+        output,
+        "Analyzed extensions: {}",
+        sorted_extensions(&report.analyzed_extensions).join(", ")
+    );
+    let _ = writeln!(
+        output,
+        "Max cognitive complexity: {}",
+        report.max_cognitive_complexity
+    );
+    let _ = writeln!(
+        output,
+        "Max cyclomatic complexity: {}",
+        report.max_cyclomatic_complexity
+    );
 }
 
 fn render_analyzed_files(output: &mut String, analyzed_file_paths: Option<&[AnalyzedFile]>) {
@@ -181,9 +185,6 @@ mod tests {
              =================\n\
              \n\
              Number of files analyzed: 0\n\
-             Analyzed extensions: rs\n\
-             Max cognitive complexity: 15\n\
-             Max cyclomatic complexity: 10\n\
              Functions exceeding limits: 0\n"
         );
     }
@@ -233,6 +234,9 @@ mod tests {
         };
         let output = render_complexity_report(&report, true);
         assert!(output.contains("Files analyzed:\n- src/lib.rs\n"));
+        assert!(output.contains("Analyzed extensions: rs\n"));
+        assert!(output.contains("Max cognitive complexity: 15\n"));
+        assert!(output.contains("Max cyclomatic complexity: 10\n"));
         assert!(output.contains("- Discovery: 1.234 ms\n"));
         assert!(output.contains("- Complexity analysis: 12.345 ms\n"));
     }
