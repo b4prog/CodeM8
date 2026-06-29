@@ -32,7 +32,14 @@ pub fn detect_complex_functions(
         .into_iter()
         .flatten()
         .collect::<Vec<_>>();
-    functions.sort_by(compare_function_complexity);
+    functions.sort_by(|left, right| {
+        compare_function_complexity(
+            left,
+            right,
+            max_cognitive_complexity,
+            max_cyclomatic_complexity,
+        )
+    });
     Ok(functions)
 }
 
@@ -114,7 +121,35 @@ fn push_complex_function(
     });
 }
 
-fn compare_function_complexity(left: &FunctionComplexity, right: &FunctionComplexity) -> Ordering {
+fn compare_function_complexity(
+    left: &FunctionComplexity,
+    right: &FunctionComplexity,
+    max_cognitive_complexity: u32,
+    max_cyclomatic_complexity: u32,
+) -> Ordering {
+    complexity_excess_score(right, max_cognitive_complexity, max_cyclomatic_complexity)
+        .total_cmp(&complexity_excess_score(
+            left,
+            max_cognitive_complexity,
+            max_cyclomatic_complexity,
+        ))
+        .then_with(|| compare_function_location(left, right))
+}
+
+fn complexity_excess_score(
+    function: &FunctionComplexity,
+    max_cognitive_complexity: u32,
+    max_cyclomatic_complexity: u32,
+) -> f64 {
+    complexity_excess(function.cognitive_complexity, max_cognitive_complexity)
+        + complexity_excess(function.cyclomatic_complexity, max_cyclomatic_complexity)
+}
+
+fn complexity_excess(complexity: f64, limit: u32) -> f64 {
+    (complexity - f64::from(limit)).max(0.0)
+}
+
+fn compare_function_location(left: &FunctionComplexity, right: &FunctionComplexity) -> Ordering {
     format_path(&left.file_path)
         .cmp(&format_path(&right.file_path))
         .then_with(|| left.start_line.cmp(&right.start_line))
@@ -206,5 +241,39 @@ mod tests {
         assert!(cyclomatic_only_functions[0].cognitive_complexity <= 2.0);
         assert!(cyclomatic_only_functions[0].cyclomatic_complexity > 2.0);
         fs::remove_file(cyclomatic_only_file.path).expect("cleanup");
+    }
+
+    #[test]
+    fn sorts_functions_by_combined_complexity_excess() {
+        let mut functions = [
+            function_complexity("medium", 12.0, 11.0),
+            function_complexity("highest", 16.0, 14.0),
+            function_complexity("tied_a", 13.0, 13.0),
+            function_complexity("cognitive_only", 17.0, 8.0),
+            function_complexity("tied_b", 14.0, 12.0),
+        ];
+        functions.sort_by(|left, right| compare_function_complexity(left, right, 10, 10));
+        assert_eq!(
+            functions
+                .iter()
+                .map(|function| function.function_name.as_str())
+                .collect::<Vec<_>>(),
+            ["highest", "cognitive_only", "tied_a", "tied_b", "medium"]
+        );
+    }
+
+    fn function_complexity(
+        function_name: &str,
+        cognitive_complexity: f64,
+        cyclomatic_complexity: f64,
+    ) -> FunctionComplexity {
+        FunctionComplexity {
+            file_path: PathBuf::from(format!("src/{function_name}.rs")),
+            function_name: function_name.to_string(),
+            start_line: 1,
+            end_line: 1,
+            cognitive_complexity,
+            cyclomatic_complexity,
+        }
     }
 }
