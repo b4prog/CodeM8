@@ -576,9 +576,6 @@ mod tests {
             "const value = computeValue(input);\nif (value === undefined) {\nreturn defaultValue;\n}\n",
         );
         let output = run_in(&project, &["--report-duplicate"]).expect("report succeeds");
-        let mut expected_extensions = language::supported_file_extensions();
-        expected_extensions.sort();
-        let expected_extensions = expected_extensions.join(", ");
         assert_eq!(
             output,
             [
@@ -586,9 +583,6 @@ mod tests {
                 "=====================\n",
                 "\n",
                 "Number of files analyzed: 2\n",
-                "Analyzed extensions: ",
-                &expected_extensions,
-                "\n",
                 "Duplicate blocks found: 1\n",
                 "\n",
                 "#1\n",
