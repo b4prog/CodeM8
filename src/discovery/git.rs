@@ -331,12 +331,13 @@ fn existing_file_path(repo_root: &Path, current_dir: &Path, path: &Path) -> Opti
     if !metadata.is_file() || metadata.file_type().is_symlink() {
         return None;
     }
+    let normalized_absolute = fs::canonicalize(&absolute).unwrap_or(absolute);
     let normalized_current_dir =
         fs::canonicalize(current_dir).unwrap_or_else(|_| current_dir.to_path_buf());
-    let relative = absolute
-        .strip_prefix(normalized_current_dir)
+    let relative = normalized_absolute
+        .strip_prefix(&normalized_current_dir)
         .map(Path::to_path_buf);
-    Some(relative.unwrap_or(absolute))
+    Some(relative.unwrap_or(normalized_absolute))
 }
 
 fn run_git_text(current_dir: &Path, args: &[&str], action: &str) -> Result<String> {
@@ -539,6 +540,32 @@ mod tests {
                 ],
             }]
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reports_relative_paths_from_symlinked_current_dir() {
+        if !git_is_available() {
+            return;
+        }
+        let repo = TempGitRepo::new("symlinked-current-dir");
+        repo.git(&["init"]);
+        repo.write("src/example.ts", "base\n");
+        repo.commit("initial");
+        repo.git(&["update-ref", "refs/remotes/origin/main", "HEAD"]);
+        repo.git(&["branch", "-M", "feature"]);
+        repo.write("src/example.ts", "base\nchanged\n");
+        let symlink = repo.path().with_extension("link");
+        std::os::unix::fs::symlink(repo.path(), &symlink).expect("create repo symlink");
+        let files = changed_lines_against_origin(&symlink).expect("list changed lines");
+        assert_eq!(
+            files,
+            [ChangedFileLines {
+                path: PathBuf::from("src/example.ts"),
+                lines: vec![LineRange { start: 2, end: 2 }],
+            }]
+        );
+        fs::remove_file(symlink).expect("remove repo symlink");
     }
 
     #[test]
