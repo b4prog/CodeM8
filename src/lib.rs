@@ -76,6 +76,10 @@ where
             write_help(writer)?;
             RunStatus::Success
         }
+        cli::CliCommand::Version => {
+            write_version(writer)?;
+            RunStatus::Success
+        }
         cli::CliCommand::Report(config) => match config.report {
             cli::ReportKind::Duplicate => run_duplicate_report(&config, current_dir, writer)?,
             cli::ReportKind::Complexity => run_complexity_report(&config, current_dir, writer)?,
@@ -88,6 +92,12 @@ fn write_help<W: Write>(writer: &mut W) -> Result<()> {
     writer
         .write_all(cli::help_text().as_bytes())
         .map_err(|error| CodeM8Error::new(format!("could not write help output: {error}")))
+}
+
+fn write_version<W: Write>(writer: &mut W) -> Result<()> {
+    let version = cli::codem8_version_from_cargo_lock().unwrap_or("unknown");
+    writeln!(writer, "{version}")
+        .map_err(|error| CodeM8Error::new(format!("could not write version output: {error}")))
 }
 
 fn run_duplicate_report<W: Write>(
@@ -1024,5 +1034,12 @@ mod tests {
         let output = run_in(&project, &["help"]).expect("help succeeds");
         assert!(output.contains("USAGE:"));
         assert!(output.contains("--report-duplicate"));
+    }
+
+    #[test]
+    fn version_option_prints_current_version() {
+        let project = TempProject::new("version");
+        let output = run_in(&project, &["--version"]).expect("version succeeds");
+        assert_eq!(output, "0.7.7\n");
     }
 }

@@ -1,11 +1,8 @@
-use std::fmt::Write as _;
-
-use super::version::codem8_version_from_cargo_lock;
-
 const HELP_TEXT_BODY: &str = "\
 USAGE:
   codem8 help
   codem8 -h
+  codem8 --version
   codem8 --report-complexity [OPTIONS]
   codem8 --report-duplicate [OPTIONS]
 
@@ -13,6 +10,9 @@ COMMANDS:
   help
   -h
       Display this detailed documentation.
+
+  --version
+      Display the current CodeM8 version.
 
 REQUIRED REPORT SWITCHES:
   --report-complexity
@@ -79,12 +79,8 @@ EXAMPLES:
 
 #[must_use]
 pub fn help_text() -> String {
-    let version = codem8_version_from_cargo_lock().unwrap_or("unknown");
     let mut output = String::new();
-    let _ = writeln!(
-        output,
-        "CodeM8 {version} - deterministic source code analysis reports."
-    );
+    output.push_str("CodeM8 - deterministic source code analysis reports.\n");
     output.push('\n');
     output.push_str(HELP_TEXT_BODY);
     output
@@ -93,7 +89,6 @@ pub fn help_text() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cli::version::codem8_version_from_cargo_lock;
 
     #[test]
     fn exposes_detailed_help_text() {
@@ -107,7 +102,9 @@ mod tests {
     fn assert_help_includes_expected_sections(help: &str) {
         assert!(help.contains("USAGE:"));
         assert!(help.contains("codem8 -h"));
+        assert!(help.contains("codem8 --version"));
         assert!(help.contains("  -h"));
+        assert!(help.contains("  --version"));
         assert!(help.contains("--report-duplicate"));
         assert!(help.contains("--report-complexity"));
         assert!(help.contains("helps you find repeated code"));
@@ -160,8 +157,8 @@ mod tests {
     }
 
     #[test]
-    fn help_text_includes_version_from_cargo_lock() {
-        let version = codem8_version_from_cargo_lock().expect("codem8 version exists");
-        assert!(help_text().starts_with(&format!("CodeM8 {version} - ")));
+    fn help_text_header_excludes_version() {
+        assert!(help_text().starts_with("CodeM8 - "));
+        assert!(!help_text().starts_with("CodeM8 0."));
     }
 }

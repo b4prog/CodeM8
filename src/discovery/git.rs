@@ -393,7 +393,11 @@ fn existing_file_path(repo_root: &Path, current_dir: &Path, path: &Path) -> Opti
     if !metadata.is_file() || metadata.file_type().is_symlink() {
         return None;
     }
-    let relative = absolute.strip_prefix(current_dir).map(Path::to_path_buf);
+    let normalized_current_dir =
+        fs::canonicalize(current_dir).unwrap_or_else(|_| current_dir.to_path_buf());
+    let relative = absolute
+        .strip_prefix(normalized_current_dir)
+        .map(Path::to_path_buf);
     Some(relative.unwrap_or(absolute))
 }
 
