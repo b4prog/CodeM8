@@ -30,7 +30,6 @@ pub struct CliConfig {
     pub file_extensions: Vec<String>,
     pub files: Option<Vec<PathBuf>>,
     pub git_branch: bool,
-    pub git_branch_strict: bool,
     pub max_cognitive_complexity: u32,
     pub max_cyclomatic_complexity: u32,
 }

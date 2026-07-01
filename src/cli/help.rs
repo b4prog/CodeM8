@@ -35,12 +35,8 @@ OPTIONS:
       Example: -files=\"src/a.ts,src/b.js\"
 
   -git-branch
-      Search only in files changed on the current local Git
+      Limit the report to lines changed on the current local Git
       branch. Cannot be combined with -files.
-
-  -git-branch-strict
-      Limit the report to lines changed on the current git branch.
-      Cannot be combined with -files or -git-branch.
 
   -max-cognitive-complexity=<value>
       Maximum allowed cognitive complexity for --report-complexity.
@@ -52,7 +48,7 @@ OPTIONS:
 
   -verbose
       Include analyzed files and timings in report output, plus duplicate block details.
-      In -git-branch-strict mode, analyzed files include changed line ranges.
+      In -git-branch mode, analyzed files include changed line ranges.
 
 COMPLEXITY REPORT PURPOSE:
   The complexity report helps you find functions whose cognitive or cyclomatic
@@ -69,12 +65,10 @@ EXAMPLES:
   codem8 --report-complexity
   codem8 --report-complexity -file-extension=rs -max-cognitive-complexity=12
   codem8 --report-complexity -git-branch
-  codem8 --report-complexity -git-branch-strict
   codem8 --report-duplicate
   codem8 --report-duplicate -file-extension=ts,tsx,js,jsx
   codem8 --report-duplicate -file-extension=ts,js -files=\"src/a.ts,src/b.js\"
   codem8 --report-duplicate -git-branch
-  codem8 --report-duplicate -git-branch-strict
 ";
 
 #[must_use]
@@ -117,7 +111,6 @@ mod tests {
         assert!(help.contains("-file-extension=<extensions>"));
         assert!(help.contains("-files=<paths>"));
         assert!(help.contains("-git-branch"));
-        assert!(help.contains("-git-branch-strict"));
         assert!(help.contains("-max-cognitive-complexity=<value>"));
         assert!(help.contains("-max-cyclomatic-complexity=<value>"));
     }
@@ -127,7 +120,6 @@ mod tests {
         assert!(!help.contains("--file-extension=<extensions>"));
         assert!(!help.contains("--files=<paths>"));
         assert!(!help.contains("--git-branch"));
-        assert!(!help.contains("--git-branch-strict"));
         assert!(!help.contains("--max-cognitive-complexity=<value>"));
         assert!(!help.contains("--max-cyclomatic-complexity=<value>"));
     }
