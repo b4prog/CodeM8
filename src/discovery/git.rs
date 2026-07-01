@@ -1,65 +1,9 @@
-use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 use crate::error::{CodeM8Error, Result};
 use crate::model::{ChangedFileLines, LineRange};
-
-/// Lists files changed on the current branch compared to the origin base branch.
-///
-/// # Errors
-///
-/// Returns an error when `current_dir` is not inside a Git repository, the
-/// current branch cannot be resolved, or the origin base branch is missing.
-pub fn changed_files_against_origin(current_dir: &Path) -> Result<Vec<PathBuf>> {
-    let repo_root = repo_root(current_dir)?;
-    ensure_named_branch(&repo_root)?;
-    let origin_ref = origin_base_ref(&repo_root)?;
-    let merge_base = run_git_text(
-        &repo_root,
-        &["merge-base", &origin_ref, "HEAD"],
-        "find merge base with origin base branch",
-    )?;
-    let mut paths = BTreeSet::new();
-    collect_nul_paths(
-        &repo_root,
-        &[
-            "diff",
-            "--name-only",
-            "-z",
-            "--diff-filter=ACMRTUXB",
-            merge_base.trim(),
-            "HEAD",
-        ],
-        &mut paths,
-    )?;
-    collect_nul_paths(
-        &repo_root,
-        &[
-            "diff",
-            "--name-only",
-            "-z",
-            "--cached",
-            "--diff-filter=ACMRTUXB",
-        ],
-        &mut paths,
-    )?;
-    collect_nul_paths(
-        &repo_root,
-        &["diff", "--name-only", "-z", "--diff-filter=ACMRTUXB"],
-        &mut paths,
-    )?;
-    collect_nul_paths(
-        &repo_root,
-        &["ls-files", "--others", "--exclude-standard", "-z"],
-        &mut paths,
-    )?;
-    Ok(paths
-        .into_iter()
-        .filter_map(|path| existing_file_path(&repo_root, current_dir, &path))
-        .collect())
-}
 
 /// Lists changed lines on the current branch compared to the origin base branch.
 ///
@@ -142,15 +86,6 @@ fn verify_origin_ref(repo_root: &Path, origin_ref: &str) -> bool {
         "resolve origin base branch",
     )
     .is_ok_and(|output| output.status.success())
-}
-
-fn collect_nul_paths(repo_root: &Path, args: &[&str], paths: &mut BTreeSet<PathBuf>) -> Result<()> {
-    let output = run_git_output(repo_root, args, "list changed git files")?;
-    let stdout = ensure_git_success(output, "list changed git files")?;
-    for path in nul_paths(&stdout) {
-        paths.insert(path);
-    }
-    Ok(())
 }
 
 fn extend_changed_lines(
@@ -333,7 +268,10 @@ fn parse_hunk_range(line: &str) -> Result<Option<LineRange>> {
     let count = count
         .parse::<usize>()
         .map_err(|_| CodeM8Error::new(format!("could not parse changed git hunk: {line}")))?;
-    Ok((count != 0).then_some(LineRange {
+    if count == 0 {
+        return Ok(None);
+    }
+    Ok(Some(LineRange {
         start,
         end: start + count - 1,
     }))
@@ -393,8 +331,13 @@ fn existing_file_path(repo_root: &Path, current_dir: &Path, path: &Path) -> Opti
     if !metadata.is_file() || metadata.file_type().is_symlink() {
         return None;
     }
-    let relative = absolute.strip_prefix(current_dir).map(Path::to_path_buf);
-    Some(relative.unwrap_or(absolute))
+    let normalized_absolute = fs::canonicalize(&absolute).unwrap_or(absolute);
+    let normalized_current_dir =
+        fs::canonicalize(current_dir).unwrap_or_else(|_| current_dir.to_path_buf());
+    let relative = normalized_absolute
+        .strip_prefix(&normalized_current_dir)
+        .map(Path::to_path_buf);
+    Some(relative.unwrap_or(normalized_absolute))
 }
 
 fn run_git_text(current_dir: &Path, args: &[&str], action: &str) -> Result<String> {
@@ -520,13 +463,16 @@ mod tests {
 
     #[test]
     fn rejects_non_git_directory() {
+        if !git_is_available() {
+            return;
+        }
         let repo = TempGitRepo::new("non-repo");
-        let error = changed_files_against_origin(repo.path()).expect_err("non-repo fails");
+        let error = changed_lines_against_origin(repo.path()).expect_err("non-repo fails");
         assert!(error.to_string().contains("requires the current directory"));
     }
 
     #[test]
-    fn lists_committed_staged_unstaged_and_untracked_files() {
+    fn lists_committed_staged_unstaged_and_untracked_changed_lines() {
         if !git_is_available() {
             return;
         }
@@ -545,9 +491,13 @@ mod tests {
         repo.write("src/base.ts", "const value = modified;\n");
         repo.write("src/untracked.ts", "const value = untracked;\n");
         fs::remove_file(repo.path().join("src/deleted.ts")).expect("delete tracked file");
-        let files = changed_files_against_origin(repo.path()).expect("list branch files");
+        let files = changed_lines_against_origin(repo.path()).expect("list branch lines");
+        let paths = files
+            .into_iter()
+            .map(|changed_file| changed_file.path)
+            .collect::<Vec<_>>();
         assert_eq!(
-            files,
+            paths,
             [
                 PathBuf::from("src/base.ts"),
                 PathBuf::from("src/committed.ts"),
@@ -593,6 +543,32 @@ mod tests {
                 ],
             }]
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reports_relative_paths_from_symlinked_current_dir() {
+        if !git_is_available() {
+            return;
+        }
+        let repo = TempGitRepo::new("symlinked-current-dir");
+        repo.git(&["init"]);
+        repo.write("src/example.ts", "base\n");
+        repo.commit("initial");
+        repo.git(&["update-ref", "refs/remotes/origin/main", "HEAD"]);
+        repo.git(&["branch", "-M", "feature"]);
+        repo.write("src/example.ts", "base\nchanged\n");
+        let symlink = repo.path().with_extension("link");
+        std::os::unix::fs::symlink(repo.path(), &symlink).expect("create repo symlink");
+        let files = changed_lines_against_origin(&symlink).expect("list changed lines");
+        assert_eq!(
+            files,
+            [ChangedFileLines {
+                path: PathBuf::from("src/example.ts"),
+                lines: vec![LineRange { start: 2, end: 2 }],
+            }]
+        );
+        fs::remove_file(symlink).expect("remove repo symlink");
     }
 
     #[test]

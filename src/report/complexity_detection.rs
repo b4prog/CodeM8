@@ -7,6 +7,7 @@ use rust_code_analysis::{get_from_ext, get_function_spaces, FuncSpace, SpaceKind
 use crate::error::{CodeM8Error, Result};
 use crate::model::{FunctionComplexity, SourceFile};
 use crate::paths::format_path;
+use crate::report::java_cognitive;
 
 const ANONYMOUS_FUNCTION_NAME: &str = "<anonymous>";
 
@@ -53,63 +54,50 @@ fn detect_file_complex_functions(
     };
     let source = fs::read(&file.path)
         .map_err(|error| CodeM8Error::io(&file.display_path, "read file", &error))?;
-    let Some(root_space) = get_function_spaces(&language, source, &file.path, None) else {
+    let Some(root_space) = get_function_spaces(&language, source.clone(), &file.path, None) else {
         return Ok(Vec::new());
     };
     let mut functions = Vec::new();
-    collect_complex_functions(
+    let mut context = ComplexityDetectionContext {
         file,
-        &root_space,
+        source: &source,
         max_cognitive_complexity,
         max_cyclomatic_complexity,
-        &mut functions,
-    );
+        functions: &mut functions,
+    };
+    collect_complex_functions(&mut context, &root_space);
     Ok(functions)
 }
 
-fn collect_complex_functions(
-    file: &SourceFile,
-    space: &FuncSpace,
+struct ComplexityDetectionContext<'a> {
+    file: &'a SourceFile,
+    source: &'a [u8],
     max_cognitive_complexity: u32,
     max_cyclomatic_complexity: u32,
-    functions: &mut Vec<FunctionComplexity>,
-) {
+    functions: &'a mut Vec<FunctionComplexity>,
+}
+
+fn collect_complex_functions(context: &mut ComplexityDetectionContext<'_>, space: &FuncSpace) {
     if space.kind == SpaceKind::Function {
-        push_complex_function(
-            file,
-            space,
-            max_cognitive_complexity,
-            max_cyclomatic_complexity,
-            functions,
-        );
+        push_complex_function(context, space);
     }
     for child in &space.spaces {
-        collect_complex_functions(
-            file,
-            child,
-            max_cognitive_complexity,
-            max_cyclomatic_complexity,
-            functions,
-        );
+        collect_complex_functions(context, child);
     }
 }
 
-fn push_complex_function(
-    file: &SourceFile,
-    space: &FuncSpace,
-    max_cognitive_complexity: u32,
-    max_cyclomatic_complexity: u32,
-    functions: &mut Vec<FunctionComplexity>,
-) {
-    let cognitive_complexity = space.metrics.cognitive.cognitive();
+fn push_complex_function(context: &mut ComplexityDetectionContext<'_>, space: &FuncSpace) {
+    let cognitive_complexity =
+        java_cognitive::cognitive_complexity(&context.file.extension, context.source, space)
+            .unwrap_or_else(|| space.metrics.cognitive.cognitive());
     let cyclomatic_complexity = space.metrics.cyclomatic.cyclomatic();
-    if cognitive_complexity <= f64::from(max_cognitive_complexity)
-        && cyclomatic_complexity <= f64::from(max_cyclomatic_complexity)
+    if cognitive_complexity <= f64::from(context.max_cognitive_complexity)
+        && cyclomatic_complexity <= f64::from(context.max_cyclomatic_complexity)
     {
         return;
     }
-    functions.push(FunctionComplexity {
-        file_path: file.display_path.clone(),
+    context.functions.push(FunctionComplexity {
+        file_path: context.file.display_path.clone(),
         function_name: space
             .name
             .clone()
@@ -241,6 +229,30 @@ mod tests {
         assert!(cyclomatic_only_functions[0].cognitive_complexity <= 2.0);
         assert!(cyclomatic_only_functions[0].cyclomatic_complexity > 2.0);
         fs::remove_file(cyclomatic_only_file.path).expect("cleanup");
+    }
+
+    #[test]
+    fn computes_java_cognitive_complexity() {
+        let java_file = source_file(
+            "java",
+            "class Sample {\n\
+             int risky(int value) {\n\
+             if (value > 10 && value < 20) {\n\
+             while (value > 0) {\n\
+             value--;\n\
+             }\n\
+             }\n\
+             return value;\n\
+             }\n\
+             }\n",
+        );
+        let functions =
+            detect_complex_functions(std::slice::from_ref(&java_file), 1, 20).expect("detect");
+        assert_eq!(functions.len(), 1);
+        assert!(functions[0].function_name.contains("risky"));
+        assert!(functions[0].cognitive_complexity > 1.0);
+        assert!(functions[0].cyclomatic_complexity <= 20.0);
+        fs::remove_file(java_file.path).expect("cleanup");
     }
 
     #[test]

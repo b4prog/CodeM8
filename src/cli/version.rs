@@ -6,7 +6,8 @@ struct CargoLockPackage<'a> {
     version: &'a str,
 }
 
-pub(super) fn codem8_version_from_cargo_lock() -> Option<&'static str> {
+#[must_use]
+pub fn codem8_version_from_cargo_lock() -> Option<&'static str> {
     cargo_lock_packages(CARGO_LOCK)
         .find(|package| package.name == "codem8")
         .map(|package| package.version)

@@ -23,14 +23,13 @@ use crate::model::{
 use crate::paths::format_path;
 
 struct BranchScope {
-    files: Option<Vec<PathBuf>>,
     lines: Option<Vec<ChangedFileLines>>,
-    strict_file_paths: Option<Vec<PathBuf>>,
+    file_paths: Option<Vec<PathBuf>>,
 }
 
 impl BranchScope {
     fn files(&self) -> Option<&[PathBuf]> {
-        self.files.as_deref().or(self.strict_file_paths.as_deref())
+        self.file_paths.as_deref()
     }
 
     fn lines(&self) -> Option<&[ChangedFileLines]> {
@@ -71,23 +70,52 @@ where
     S: Into<String>,
     W: Write,
 {
-    let status = match cli::parse_command(args)? {
-        cli::CliCommand::Help => {
-            write_help(writer)?;
-            RunStatus::Success
-        }
-        cli::CliCommand::Report(config) => match config.report {
-            cli::ReportKind::Duplicate => run_duplicate_report(&config, current_dir, writer)?,
-            cli::ReportKind::Complexity => run_complexity_report(&config, current_dir, writer)?,
-        },
-    };
-    Ok(status)
+    run_command(cli::parse_command(args)?, current_dir, writer)
+}
+
+fn run_command<W: Write>(
+    command: cli::CliCommand,
+    current_dir: &Path,
+    writer: &mut W,
+) -> Result<RunStatus> {
+    match command {
+        cli::CliCommand::Help => run_help_command(writer),
+        cli::CliCommand::Version => run_version_command(writer),
+        cli::CliCommand::Report(config) => run_report_command(&config, current_dir, writer),
+    }
+}
+
+fn run_help_command<W: Write>(writer: &mut W) -> Result<RunStatus> {
+    write_help(writer)?;
+    Ok(RunStatus::Success)
+}
+
+fn run_version_command<W: Write>(writer: &mut W) -> Result<RunStatus> {
+    write_version(writer)?;
+    Ok(RunStatus::Success)
+}
+
+fn run_report_command<W: Write>(
+    config: &cli::CliConfig,
+    current_dir: &Path,
+    writer: &mut W,
+) -> Result<RunStatus> {
+    match config.report {
+        cli::ReportKind::Duplicate => run_duplicate_report(config, current_dir, writer),
+        cli::ReportKind::Complexity => run_complexity_report(config, current_dir, writer),
+    }
 }
 
 fn write_help<W: Write>(writer: &mut W) -> Result<()> {
     writer
         .write_all(cli::help_text().as_bytes())
         .map_err(|error| CodeM8Error::new(format!("could not write help output: {error}")))
+}
+
+fn write_version<W: Write>(writer: &mut W) -> Result<()> {
+    let version = cli::codem8_version_from_cargo_lock().unwrap_or("unknown");
+    writeln!(writer, "{version}")
+        .map_err(|error| CodeM8Error::new(format!("could not write version output: {error}")))
 }
 
 fn run_duplicate_report<W: Write>(
@@ -149,7 +177,9 @@ fn run_complexity_report<W: Write>(
         )
     })?;
     let functions = match branch_scope.lines() {
-        Some(git_branch_lines) => filtered_strict_complex_functions(functions, git_branch_lines),
+        Some(git_branch_lines) => {
+            filtered_changed_line_complex_functions(functions, git_branch_lines)
+        }
         None => functions,
     };
     let report = report::ComplexityReport {
@@ -170,32 +200,16 @@ fn run_complexity_report<W: Write>(
 }
 
 fn changed_branch_scope(config: &cli::CliConfig, current_dir: &Path) -> Result<BranchScope> {
-    let files = changed_git_branch_files(config, current_dir)?;
     let lines = changed_git_branch_lines(config, current_dir)?;
-    let strict_file_paths = lines.as_ref().map(|lines| changed_line_paths(lines));
-    Ok(BranchScope {
-        files,
-        lines,
-        strict_file_paths,
-    })
-}
-
-fn changed_git_branch_files(
-    config: &cli::CliConfig,
-    current_dir: &Path,
-) -> Result<Option<Vec<PathBuf>>> {
-    if config.git_branch {
-        discovery::changed_files_against_origin(current_dir).map(Some)
-    } else {
-        Ok(None)
-    }
+    let file_paths = lines.as_ref().map(|lines| changed_line_paths(lines));
+    Ok(BranchScope { lines, file_paths })
 }
 
 fn changed_git_branch_lines(
     config: &cli::CliConfig,
     current_dir: &Path,
 ) -> Result<Option<Vec<ChangedFileLines>>> {
-    if config.git_branch_strict {
+    if config.git_branch {
         discovery::changed_lines_against_origin(current_dir).map(Some)
     } else {
         Ok(None)
@@ -203,7 +217,7 @@ fn changed_git_branch_lines(
 }
 
 fn duplicate_discovery_files(config: &cli::CliConfig) -> Option<&[PathBuf]> {
-    if config.git_branch || config.git_branch_strict {
+    if config.git_branch {
         None
     } else {
         config.files.as_deref()
@@ -327,7 +341,7 @@ fn filtered_duplicate_blocks_for_scope(
         None => duplicate_blocks,
     };
     match branch_scope.lines() {
-        Some(lines) => filtered_strict_duplicate_blocks(duplicate_blocks, lines),
+        Some(lines) => filtered_changed_line_duplicate_blocks(duplicate_blocks, lines),
         None => duplicate_blocks,
     }
 }
@@ -378,7 +392,7 @@ fn changed_lines_for_path(
         .map(|changed_file| changed_file.lines.clone())
 }
 
-fn filtered_strict_duplicate_blocks(
+fn filtered_changed_line_duplicate_blocks(
     duplicate_blocks: Vec<DuplicateBlock>,
     changed_lines: &[ChangedFileLines],
 ) -> Vec<DuplicateBlock> {
@@ -409,7 +423,7 @@ fn occurrence_applies_to_changed_lines(
     })
 }
 
-fn filtered_strict_complex_functions(
+fn filtered_changed_line_complex_functions(
     functions: Vec<FunctionComplexity>,
     changed_lines: &[ChangedFileLines],
 ) -> Vec<FunctionComplexity> {
@@ -703,7 +717,7 @@ mod tests {
     }
 
     #[test]
-    fn git_branch_mode_reports_duplicates_for_changed_files_against_repo() {
+    fn git_branch_mode_reports_duplicates_for_changed_lines_against_repo() {
         if !git_is_available() {
             return;
         }
@@ -744,11 +758,11 @@ mod tests {
     }
 
     #[test]
-    fn strict_git_branch_mode_reports_duplicates_only_on_changed_lines() {
+    fn git_branch_mode_reports_duplicates_only_on_changed_lines() {
         if !git_is_available() {
             return;
         }
-        let project = TempGitRepo::new("strict-duplicate-lines");
+        let project = TempGitRepo::new("git-branch-duplicate-lines");
         project.git(&["init"]);
         project.write("src/a.ts", "const shared = 1;\nconst branch = 1;\n");
         project.write("src/b.ts", "const shared = 1;\n");
@@ -756,26 +770,26 @@ mod tests {
         project.git(&["update-ref", "refs/remotes/origin/main", "HEAD"]);
         project.git(&["branch", "-M", "feature"]);
         project.write("src/a.ts", "const shared = 1;\nconst branch = 2;\n");
-        let output = run_in(&project, &["--report-duplicate", "-git-branch-strict"])
-            .expect("report succeeds");
+        let output =
+            run_in(&project, &["--report-duplicate", "-git-branch"]).expect("report succeeds");
         assert!(output.contains("Number of files analyzed: 1"));
         assert!(output.contains("Duplicate blocks found: 0"));
         project.write("src/a.ts", "const changed = 1;\nconst branch = 2;\n");
         project.commit("branch change");
         project.write("src/b.ts", "const changed = 1;\n");
-        let output = run_in(&project, &["--report-duplicate", "-git-branch-strict"])
-            .expect("report succeeds");
+        let output =
+            run_in(&project, &["--report-duplicate", "-git-branch"]).expect("report succeeds");
         assert!(output.contains("Duplicate blocks found: 1"));
         assert!(output.contains("- src/a.ts:1-1"));
         assert!(output.contains("- src/b.ts:1-1"));
     }
 
     #[test]
-    fn verbose_strict_git_branch_report_lists_changed_line_ranges() {
+    fn verbose_git_branch_report_lists_changed_line_ranges() {
         if !git_is_available() {
             return;
         }
-        let project = TempGitRepo::new("strict-verbose-ranges");
+        let project = TempGitRepo::new("git-branch-verbose-ranges");
         project.git(&["init"]);
         project.write(
             "src/a.ts",
@@ -788,11 +802,8 @@ mod tests {
             "src/a.ts",
             "const one = 1;\nconst two = 20;\nconst three = 30;\n",
         );
-        let output = run_in(
-            &project,
-            &["--report-duplicate", "-git-branch-strict", "-verbose"],
-        )
-        .expect("report succeeds");
+        let output = run_in(&project, &["--report-duplicate", "-git-branch", "-verbose"])
+            .expect("report succeeds");
         assert!(output.contains("Files analyzed:\n- src/a.ts (2-3)\n"));
     }
 
@@ -892,7 +903,7 @@ mod tests {
     }
 
     #[test]
-    fn git_branch_mode_limits_complexity_search_to_changed_files() {
+    fn git_branch_mode_limits_complexity_search_to_changed_lines() {
         if !git_is_available() {
             return;
         }
@@ -932,11 +943,11 @@ mod tests {
     }
 
     #[test]
-    fn strict_git_branch_mode_reports_complexity_only_for_changed_functions() {
+    fn git_branch_mode_reports_complexity_only_for_changed_functions() {
         if !git_is_available() {
             return;
         }
-        let project = TempGitRepo::new("strict-complexity-lines");
+        let project = TempGitRepo::new("git-branch-complexity-lines");
         project.git(&["init"]);
         project.write(
             "src/lib.rs",
@@ -971,7 +982,7 @@ mod tests {
             &project,
             &[
                 "--report-complexity",
-                "-git-branch-strict",
+                "-git-branch",
                 "-file-extension=rs",
                 "-max-cognitive-complexity=1",
                 "-max-cyclomatic-complexity=1",
@@ -997,7 +1008,7 @@ mod tests {
             &project,
             &[
                 "--report-complexity",
-                "-git-branch-strict",
+                "-git-branch",
                 "-file-extension=rs",
                 "-max-cognitive-complexity=1",
                 "-max-cyclomatic-complexity=1",
@@ -1024,5 +1035,12 @@ mod tests {
         let output = run_in(&project, &["help"]).expect("help succeeds");
         assert!(output.contains("USAGE:"));
         assert!(output.contains("--report-duplicate"));
+    }
+
+    #[test]
+    fn version_option_prints_current_version() {
+        let project = TempProject::new("version");
+        let output = run_in(&project, &["--version"]).expect("version succeeds");
+        assert_eq!(output, "0.7.7\n");
     }
 }

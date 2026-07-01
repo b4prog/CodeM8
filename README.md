@@ -74,7 +74,7 @@ codem8 --report-duplicate -file-extension=ts,js -files="src/a.ts,src/b.js"
 Quoting `-files` values is recommended in PowerShell when paths contain file
 extensions.
 
-Analyze files changed on the current local Git branch compared to the origin
+Analyze lines changed on the current local Git branch compared to the origin
 base branch:
 
 ```bash
@@ -111,7 +111,7 @@ The default maximum cognitive complexity is 15, and the default maximum
 cyclomatic complexity is 10. Use `-max-cognitive-complexity=<value>` and
 `-max-cyclomatic-complexity=<value>` to adjust them.
 
-Use `-git-branch` to analyze complexity only in supported files changed on the
+Use `-git-branch` to analyze complexity only in supported lines changed on the
 current local branch. The same origin branch resolution and `-files` exclusion
 rules used by the duplicate report apply.
 
@@ -130,7 +130,7 @@ trailing Unicode whitespace are removed before hashing and comparison. Empty
 trimmed lines are ignored. CodeM8 currently expects UTF-8 source files; invalid
 UTF-8 produces a clear error rather than lossy output.
 
-Use `-git-branch` to search duplicate code only in files changed on the current
+Use `-git-branch` to search duplicate code only in lines changed on the current
 local branch. CodeM8 resolves that branch set from `origin/HEAD` with
 `origin/main` and `origin/master` fallbacks. The option requires a Git
 repository and cannot be combined with `-files`.
