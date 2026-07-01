@@ -149,8 +149,24 @@ struct JavaCognitiveScanner<'a> {
     tokens: &'a [String],
     index: usize,
     nesting: u32,
-    pending_nesting_blocks: u32,
+    pending_blocks: Vec<BlockKind>,
+    blocks: Vec<BlockKind>,
+    previous_non_header_boolean_operator: Option<BooleanOperator>,
+    after_do_block: bool,
     score: u32,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BlockKind {
+    Control,
+    Do,
+    Plain,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BooleanOperator {
+    And,
+    Or,
 }
 
 impl<'a> JavaCognitiveScanner<'a> {
@@ -159,7 +175,10 @@ impl<'a> JavaCognitiveScanner<'a> {
             tokens,
             index: 0,
             nesting: 0,
-            pending_nesting_blocks: 0,
+            pending_blocks: Vec::new(),
+            blocks: Vec::new(),
+            previous_non_header_boolean_operator: None,
+            after_do_block: false,
             score: 0,
         }
     }
@@ -173,23 +192,18 @@ impl<'a> JavaCognitiveScanner<'a> {
     }
 
     fn scan_token(&mut self) {
-        match self.current() {
-            "if" if self.previous_is("else") => {
-                self.add_condition_complexity();
-                self.pending_nesting_blocks += 1;
-            }
-            "if" | "for" | "while" | "switch" | "catch" => {
-                self.score += self.nesting + 1;
-                self.add_condition_complexity();
-                self.pending_nesting_blocks += 1;
-            }
-            "else" => self.score += 1,
-            "do" | "?" => self.score += self.nesting + 1,
-            "&&" | "||" => self.add_boolean_sequence_complexity(),
-            "{" => self.open_block(),
-            "}" => self.nesting = self.nesting.saturating_sub(1),
-            _ => {}
+        if self.scan_if_after_else()
+            || self.scan_control_token()
+            || self.scan_else()
+            || self.scan_do()
+            || self.scan_question_mark()
+            || self.scan_boolean_operator()
+            || self.scan_block_boundary()
+            || self.scan_statement_boundary()
+        {
+            return;
         }
+        self.after_do_block = false;
     }
 
     fn current(&self) -> &str {
@@ -200,11 +214,106 @@ impl<'a> JavaCognitiveScanner<'a> {
         self.index > 0 && self.tokens[self.index - 1] == token
     }
 
-    const fn open_block(&mut self) {
-        if self.pending_nesting_blocks > 0 {
-            self.nesting += 1;
-            self.pending_nesting_blocks -= 1;
+    fn scan_if_after_else(&mut self) -> bool {
+        if self.current() != "if" || !self.previous_is("else") {
+            return false;
         }
+        self.add_condition_complexity();
+        self.pending_blocks.push(BlockKind::Control);
+        true
+    }
+
+    fn scan_control_token(&mut self) -> bool {
+        if !is_control_token(Some(&self.tokens[self.index])) {
+            return false;
+        }
+        if self.current() == "while" && self.after_do_block {
+            self.add_condition_complexity();
+            self.after_do_block = false;
+            self.reset_non_header_boolean_sequence();
+            return true;
+        }
+        self.score += self.nesting + 1;
+        self.add_condition_complexity();
+        self.pending_blocks.push(BlockKind::Control);
+        true
+    }
+
+    fn scan_else(&mut self) -> bool {
+        if self.current() != "else" {
+            return false;
+        }
+        self.score += 1;
+        true
+    }
+
+    fn scan_do(&mut self) -> bool {
+        if self.current() != "do" {
+            return false;
+        }
+        self.score += self.nesting + 1;
+        self.pending_blocks.push(BlockKind::Do);
+        true
+    }
+
+    fn scan_question_mark(&mut self) -> bool {
+        if self.current() != "?" {
+            return false;
+        }
+        self.score += self.nesting + 1;
+        true
+    }
+
+    fn scan_boolean_operator(&mut self) -> bool {
+        if !matches!(self.current(), "&&" | "||") {
+            return false;
+        }
+        self.add_boolean_sequence_complexity();
+        true
+    }
+
+    fn scan_block_boundary(&mut self) -> bool {
+        if self.current() == "{" {
+            self.open_block();
+            return true;
+        }
+        if self.current() == "}" {
+            self.close_block();
+            return true;
+        }
+        false
+    }
+
+    fn scan_statement_boundary(&mut self) -> bool {
+        if self.current() != ";" || self.is_inside_condition_header() {
+            return false;
+        }
+        self.pending_blocks.clear();
+        self.after_do_block = false;
+        self.reset_non_header_boolean_sequence();
+        true
+    }
+
+    fn open_block(&mut self) {
+        let block = self.pending_blocks.pop().unwrap_or(BlockKind::Plain);
+        if matches!(block, BlockKind::Control | BlockKind::Do) {
+            self.nesting += 1;
+        }
+        self.blocks.push(block);
+        self.reset_non_header_boolean_sequence();
+    }
+
+    fn close_block(&mut self) {
+        if let Some(block) = self.blocks.pop() {
+            if matches!(block, BlockKind::Control | BlockKind::Do) {
+                self.nesting = self.nesting.saturating_sub(1);
+            }
+            self.after_do_block = block == BlockKind::Do;
+            if matches!(block, BlockKind::Control | BlockKind::Do) {
+                self.pending_blocks.clear();
+            }
+        }
+        self.reset_non_header_boolean_sequence();
     }
 
     fn add_condition_complexity(&mut self) {
@@ -232,8 +341,20 @@ impl<'a> JavaCognitiveScanner<'a> {
 
     fn add_boolean_sequence_complexity(&mut self) {
         if !self.is_inside_condition_header() {
+            self.add_non_header_boolean_sequence_complexity();
+        }
+    }
+
+    fn add_non_header_boolean_sequence_complexity(&mut self) {
+        let operator = BooleanOperator::from_token(self.current());
+        if self.previous_non_header_boolean_operator != Some(operator) {
             self.score += 1;
         }
+        self.previous_non_header_boolean_operator = Some(operator);
+    }
+
+    const fn reset_non_header_boolean_sequence(&mut self) {
+        self.previous_non_header_boolean_operator = None;
     }
 
     fn is_inside_condition_header(&self) -> bool {
@@ -242,7 +363,7 @@ impl<'a> JavaCognitiveScanner<'a> {
             match self.tokens[index].as_str() {
                 ")" => depth += 1,
                 "(" if depth == 0 => {
-                    return is_control_token(self.tokens.get(index.wrapping_sub(1)))
+                    return self.is_control_header_start(index);
                 }
                 "(" => depth = depth.saturating_sub(1),
                 "{" | ";" if depth == 0 => return false,
@@ -250,6 +371,23 @@ impl<'a> JavaCognitiveScanner<'a> {
             }
         }
         false
+    }
+
+    fn is_control_header_start(&self, open_paren_index: usize) -> bool {
+        let mut index = open_paren_index;
+        while index > 0 && self.tokens[index - 1] == "(" {
+            index -= 1;
+        }
+        is_control_token(self.tokens.get(index.wrapping_sub(1)))
+    }
+}
+
+impl BooleanOperator {
+    const fn from_token(token: &str) -> Self {
+        match token.as_bytes().first() {
+            Some(b'&') => Self::And,
+            _ => Self::Or,
+        }
     }
 }
 
@@ -275,4 +413,45 @@ fn is_control_token(token: Option<&String>) -> bool {
         token.map(String::as_str),
         Some("if" | "for" | "while" | "switch" | "catch")
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{tokenize_java, JavaCognitiveScanner};
+
+    fn assert_java_cognitive_score(source: &str, expected: f64) {
+        let tokens = tokenize_java(source);
+        let actual = JavaCognitiveScanner::new(&tokens).scan();
+        assert!((actual - expected).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn keeps_control_nesting_after_nested_plain_block_closes() {
+        let source = "void f() { if (a) { { helper(); } if (b) { helper(); } } }";
+        assert_java_cognitive_score(source, 3.0);
+    }
+
+    #[test]
+    fn does_not_leak_braceless_control_nesting_to_unrelated_block() {
+        let source = "void f() { if (a) helper(); { if (b) { helper(); } } }";
+        assert_java_cognitive_score(source, 2.0);
+    }
+
+    #[test]
+    fn treats_do_while_as_one_loop() {
+        let source = "void f() { do { if (a) { helper(); } } while (b); }";
+        assert_java_cognitive_score(source, 3.0);
+    }
+
+    #[test]
+    fn groups_non_header_boolean_sequences() {
+        let source = "void f() { return a && b && c; }";
+        assert_java_cognitive_score(source, 1.0);
+    }
+
+    #[test]
+    fn treats_nested_control_header_parentheses_as_header() {
+        let source = "void f() { if ((a && b)) { helper(); } }";
+        assert_java_cognitive_score(source, 2.0);
+    }
 }
