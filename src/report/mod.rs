@@ -2,6 +2,7 @@ mod complexity_detection;
 mod complexity_renderer;
 mod duplicate_detection;
 mod duplicate_renderer;
+mod java_cognitive;
 
 pub(crate) use complexity_detection::{
     complexity_supported_file_extensions, detect_complex_functions,
