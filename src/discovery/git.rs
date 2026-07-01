@@ -463,6 +463,9 @@ mod tests {
 
     #[test]
     fn rejects_non_git_directory() {
+        if !git_is_available() {
+            return;
+        }
         let repo = TempGitRepo::new("non-repo");
         let error = changed_lines_against_origin(repo.path()).expect_err("non-repo fails");
         assert!(error.to_string().contains("requires the current directory"));
